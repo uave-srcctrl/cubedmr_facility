@@ -36,14 +36,10 @@ export default function EtiologyReport() {
     queryKey: ['etiologyReport', format(date, 'yyyy-MM-dd')],
     queryFn: async () => {
       const formattedDate = format(date, 'yyyy-MM-dd');
-      const params = new URLSearchParams({
-        entity: 'Report',
-        reportName: 'rptEtiologyDistribution',
-        facilityId: '5',
-        dos: formattedDate
-      });
+      const facilityId = '5';
+      const url = `https://cubed-mr.app/api/reports/etiology-distribution/${facilityId}/${formattedDate}`;
       
-      const response = await fetch(`https://cubed-mr.app/api/report?${params.toString()}`);
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.statusText}`);
