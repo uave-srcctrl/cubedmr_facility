@@ -79,8 +79,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3 px-2 mb-4">
           <Avatar className="h-9 w-9 border border-sidebar-border">
-            <AvatarImage src="https://github.com/shadcn.png" />
-            <AvatarFallback>DR</AvatarFallback>
+            <AvatarFallback>{user?.name?.charAt(0) || "D"}</AvatarFallback>
           </Avatar>
           <div className="flex flex-col">
             <span className="text-sm font-medium">{user?.name || "Dr. Smith"}</span>

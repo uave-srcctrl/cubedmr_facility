@@ -29,9 +29,20 @@ export async function setupVite(server: Server, app: Express) {
     appType: "custom",
   });
 
-  app.use(vite.middlewares);
+  // Skip Vite middlewares for API routes
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api")) {
+      return next();
+    }
+    vite.middlewares(req, res, next);
+  });
 
   app.use("*", async (req, res, next) => {
+    // Skip non-GET requests (API requests)
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return next();
+    }
+    
     const url = req.originalUrl;
 
     try {

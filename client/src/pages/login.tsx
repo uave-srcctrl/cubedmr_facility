@@ -15,11 +15,10 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Activity, Lock } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { LOCAL_API } from "@/lib/api-config";
 
 const formSchema = z.object({
-  email: z.string().email({
-    message: "Please enter a valid email address.",
-  }),
+  identifier: z.string().email("Please enter a valid email address."),
   password: z.string().min(1, {
     message: "Password is required.",
   }),
@@ -36,24 +35,124 @@ export default function Login({ onLogin }: LoginProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      email: "",
+      identifier: "",
       password: "",
     },
   });
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-      if (values.email) {
+    try {
+      // Facility login by email
+      const email = values.identifier;
+      const entity = "TryLoginFacilities";
+      
+      // Generate a device ID if not already in localStorage
+      let deviceId = localStorage.getItem("deviceId");
+      if (!deviceId) {
+        deviceId = "web-" + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem("deviceId", deviceId);
+      }
+
+      console.log("[Login] Submitting facility login with email:", email, "- Entity:", entity, "- DeviceId:", deviceId);
+      
+      const response = await fetch(LOCAL_API.LOGIN, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: entity,
+          email: email,
+          password: values.password,
+          name: email,
+          deviceId: deviceId,
+        }),
+      });
+
+      console.log("[Login] Response status:", response.status);
+      
+      const text = await response.text();
+      console.log("[Login] Raw response text:", text);
+      
+      const data = JSON.parse(text);
+      console.log("[Login] Response data:", data);
+
+      // Check if authentication was successful
+      // The backend returns: { status: true, data: [{ status: 1, token, entityId, entity, entityName, facilities, msg }] }
+      // OR for already authenticated sessions: { status: false, data: [{ status: 0, facilityId, email, name, msg }] }
+      const dataItem = data.data && data.data[0];
+      const isSuccess = (data.status === true && dataItem?.status === 1) || 
+                        (dataItem?.facilityId && dataItem?.email);
+      
+      if (isSuccess && dataItem) {
+        console.log("[Login] Authentication successful or already active!");
+        
+        // Use facilityId or entityId (handle both response formats)
+        const facilityId = String(dataItem.entityId || dataItem.facilityId);
+        const facilityName = dataItem.entityName || dataItem.name || values.identifier.split('@')[0] || "Facility";
+        
+        // Store facility ID (must be string)
+        if (facilityId && facilityId !== "undefined") {
+          localStorage.setItem("userFacilityId", facilityId);
+          localStorage.setItem("userEntityId", facilityId);
+          console.log("[Login] Facility ID stored:", facilityId);
+        }
+        
+        // Store token if present
+        if (dataItem.token) {
+          localStorage.setItem("authToken", dataItem.token);
+          console.log("[Login] Token stored in localStorage");
+        }
+        
+        // Store email for display purposes
+        localStorage.setItem("userEmail", values.identifier);
+        
+        // Store facility info
+        if (dataItem.entity) {
+          localStorage.setItem("userEntity", dataItem.entity);
+        }
+        
+        localStorage.setItem("userEntityName", facilityName);
+        
+        // Store accessible facilities list for authorization checks
+        if (dataItem.facilities && Array.isArray(dataItem.facilities)) {
+          localStorage.setItem("userFacilities", JSON.stringify(dataItem.facilities));
+          console.log("[Login] Facilities list stored:", dataItem.facilities);
+        }
+        
+        console.log("[Login] Facility info stored:", {
+          entity: dataItem.entity,
+          entityName: facilityName,
+          facilityId: facilityId,
+          facilities: dataItem.facilities,
+        });
+        
         onLogin();
+        
+        // Show welcome message with facility name
         toast({
-          title: "Welcome back",
+          title: `Welcome, ${facilityName}!`,
           description: "You have successfully logged in.",
         });
+      } else {
+        console.log("[Login] Authentication failed:", dataItem?.msg);
+        toast({
+          title: "Login failed",
+          description: dataItem?.msg || "Invalid email or password.",
+          variant: "destructive",
+        });
       }
-    }, 1000);
+    } catch (error) {
+      console.error("[Login] Error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to connect to server.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
@@ -73,7 +172,7 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
           <CardTitle className="text-2xl font-bold tracking-tight text-primary">WoundCare Analytics</CardTitle>
           <CardDescription>
-            Secure access for healthcare facilities
+            Facility Administration Portal
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -81,12 +180,12 @@ export default function Login({ onLogin }: LoginProps) {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
-                name="email"
+                name="identifier"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel>Facility Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="admin@facility.com" {...field} className="bg-white/50" />
+                      <Input placeholder="facility@example.com" type="email" {...field} className="bg-white/50" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

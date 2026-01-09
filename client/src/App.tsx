@@ -11,16 +11,17 @@ import FacilityWoundReport from "@/pages/facility-wound-report";
 import OutcomeReportGlobal from "@/pages/outcome-report";
 import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/use-auth";
 
-function Router({ isAuthenticated, onLogout }: { isAuthenticated: boolean; onLogout: () => void }) {
+function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean; user: any; onLogout: () => void }) {
   if (!isAuthenticated) {
     // Simple redirection to login if not authenticated, although simple conditional rendering in App handles this too.
     return <Login onLogin={() => window.location.reload()} />; 
   }
 
   return (
-    <Layout user={{ name: "Dr. Sarah Jenkins", role: "Clinical Director" }} onLogout={onLogout}>
+    <Layout user={user} onLogout={onLogout}>
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/facility-report" component={FacilityWoundReport} />
@@ -34,20 +35,60 @@ function Router({ isAuthenticated, onLogout }: { isAuthenticated: boolean; onLog
 }
 
 function App() {
-  // Simple mock auth state - default to false to show login first
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, getAuthInfo, logout } = useAuth();
+  const [isAuth, setIsAuth] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
-  const handleLogin = () => setIsAuthenticated(true);
-  const handleLogout = () => setIsAuthenticated(false);
+  // Initialize auth state on mount
+  useEffect(() => {
+    const updateAuthState = () => {
+      if (isAuthenticated()) {
+        const authInfo = getAuthInfo();
+        setIsAuth(true);
+        setUser({
+          name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
+          role: authInfo.entity || "Facility Admin",
+          email: authInfo.email,
+          entityId: authInfo.entityId,
+        });
+        console.log("[App] Auth state updated:", { authInfo });
+      } else {
+        setIsAuth(false);
+        setUser(null);
+        console.log("[App] Auth cleared");
+      }
+    };
+
+    updateAuthState();
+
+    // Listen for storage changes (login from another tab)
+    const handleStorageChange = () => {
+      updateAuthState();
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  const handleLogout = async () => {
+    await logout();
+    setIsAuth(false);
+    setUser(null);
+    // Redirect to login page
+    window.location.href = "/login";
+  };
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        {isAuthenticated ? (
-          <Router isAuthenticated={true} onLogout={handleLogout} />
+        {isAuth && user ? (
+          <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
         ) : (
-          <Login onLogin={handleLogin} />
+          <Login onLogin={() => {
+            // Navigate to dashboard after successful login
+            window.location.href = "/";
+          }} />
         )}
       </TooltipProvider>
     </QueryClientProvider>

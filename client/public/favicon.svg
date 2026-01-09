@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <style>
+      .bg { fill: #0ea5e9; }
+      .icon { fill: white; }
+    </style>
+  </defs>
+  <!-- Background -->
+  <rect class="bg" width="32" height="32" rx="6"/>
+  <!-- Activity/Heartbeat icon -->
+  <g class="icon" transform="translate(4, 8)">
+    <polyline points="1 10 3 6 5 10 7 2 9 10 15 10" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
