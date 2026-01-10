@@ -10,10 +10,14 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  app.use("/facility/public", express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // SPA fallback: only for non-file routes (no file extension)
+  app.use("*", (req, res) => {
+    // If the request has a file extension, don't serve index.html
+    if (path.extname(req.path)) {
+      return res.status(404).send("Not Found");
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
