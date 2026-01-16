@@ -8,7 +8,8 @@
 const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_URL || "https://cubed-mr.app";
 
 // Local server API base URL (for local API calls)
-const LOCAL_API_BASE = "/api";
+// With <base href="/facility/"> in index.html, relative paths work correctly
+const LOCAL_API_BASE = "api";
 
 /**
  * Local API Endpoints (via our Express server)

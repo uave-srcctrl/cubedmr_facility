@@ -28,15 +28,17 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, user, onLogout }: LayoutProps) {
+  console.log('[Layout] Component mounted/rendered with user:', user?.name);
   const [location] = useLocation();
+  console.log('[Layout] Current location:', location);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   const navigation = [
-    { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    { name: "Facility Wound Report", href: "/facility-report", icon: FileText },
-    { name: "Outcome Report Global", href: "/outcome-report", icon: Activity },
-    { name: "Wound Etiology", href: "/etiology-report", icon: PieChart },
-    { name: "Acuity Index", href: "/acuity-report", icon: Stethoscope },
+    { name: "Dashboard", href: "/facility/", icon: LayoutDashboard },
+    { name: "Facility Wound Report", href: "/facility/facility-report", icon: FileText },
+    { name: "Outcome Report Global", href: "/facility/outcome-report", icon: Activity },
+    { name: "Wound Etiology", href: "/facility/etiology-report", icon: PieChart },
+    { name: "Acuity Index", href: "/facility/acuity-report", icon: Stethoscope },
   ];
 
   const SidebarContent = () => (

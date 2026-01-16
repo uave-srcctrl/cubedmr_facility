@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import helmet from "helmet";
 
 const app = express();
 const httpServer = createServer(app);
@@ -12,6 +13,40 @@ declare module "http" {
   }
 }
 
+// Security: Apply Helmet for security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://cubed-mr.app", "https://fonts.googleapis.com"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameguard: {
+    action: "deny",
+  },
+  referrerPolicy: {
+    policy: "strict-origin-when-cross-origin",
+  },
+}));
+
+// Security: Add additional security headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  next();
+});
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -21,6 +56,19 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Middleware para manejar rutas de API con y sin prefijo /facility
+// Esto permite que Apache pueda enviar /facility/api/... y el servidor lo entienda como /api/...
+app.use((req, res, next) => {
+  // Only rewrite /facility/api/* routes to /api/*
+  if (req.path.startsWith("/facility/api/")) {
+    console.log(`[Middleware] Rewriting /facility/api/ to /api/: ${req.path} -> ${req.path.replace(/^\/facility/, "")}`);
+    req.url = req.url.replace(/^\/facility/, "");
+  } else if (req.path.startsWith("/api/")) {
+    console.log(`[Middleware] Already /api/, no rewrite needed: ${req.path}`);
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

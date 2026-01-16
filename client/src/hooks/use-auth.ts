@@ -1,4 +1,5 @@
 import { LOCAL_API } from "@/lib/api-config";
+import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 export function useAuth() {
   function getToken(): string | null {
@@ -53,19 +54,27 @@ export function useAuth() {
     
     try {
       const token = getToken();
-      if (token) {
-        // Call logout endpoint
-        await fetch(LOCAL_API.LOGOUT, {
+      const email = getEmail();
+      const facilityId = getFacilityId();
+      
+      if (token && email) {
+        const response = await fetch(LOCAL_API.LOGOUT, {
           method: "POST",
           headers: {
+            "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`,
           },
+          body: JSON.stringify({
+            email,
+            facility_id: facilityId,
+          }),
         });
+        
+        await response.json();
       }
     } catch (error) {
       console.error("[Auth] Logout error:", error);
     } finally {
-      // Always clear local storage
       clearAuth();
     }
   }
@@ -83,6 +92,7 @@ export function useAuth() {
 
   function clearAuth(): void {
     if (typeof window === "undefined") return;
+    
     localStorage.removeItem("authToken");
     localStorage.removeItem("userEmail");
     localStorage.removeItem("userEntity");
@@ -90,6 +100,9 @@ export function useAuth() {
     localStorage.removeItem("userEntityId");
     localStorage.removeItem("userFacilityId");
     localStorage.removeItem("userFacilities");
+    
+    // Dispatch logout event
+    dispatchAuthEvent(AUTH_EVENTS.LOGOUT);
   }
 
   function getAuthInfo(): {

@@ -16,6 +16,7 @@ import { Activity, Lock } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { LOCAL_API } from "@/lib/api-config";
+import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 const formSchema = z.object({
   identifier: z.string().email("Please enter a valid email address."),
@@ -82,59 +83,93 @@ export default function Login({ onLogin }: LoginProps) {
       // The backend returns: { status: true, data: [{ status: 1, token, entityId, entity, entityName, facilities, msg }] }
       // OR for already authenticated sessions: { status: false, data: [{ status: 0, facilityId, email, name, msg }] }
       const dataItem = data.data && data.data[0];
+      
+      // Check if there's an active session (status: 0, reason: 1 = "Facility currently authenticated")
+      if (dataItem?.status === 0 && dataItem?.reason === 1) {
+        console.log("[Login] Active session detected, attempting to retry with different device ID...");
+        
+        // Retry up to 3 times with different device IDs
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries) {
+          retryCount++;
+          
+          // Generate a new device ID
+          const newDeviceId = "web-" + Math.random().toString(36).substr(2, 9);
+          localStorage.setItem("deviceId", newDeviceId);
+          
+          console.log(`[Login] Retry ${retryCount}/${maxRetries} with device ID:`, newDeviceId);
+          
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          const retryResponse = await fetch(LOCAL_API.LOGIN, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: entity,
+              email: email,
+              password: values.password,
+              name: email,
+              deviceId: newDeviceId,
+            }),
+          });
+          
+          const retryText = await retryResponse.text();
+          const retryData = JSON.parse(retryText);
+          console.log(`[Login] Retry ${retryCount} response:`, retryData);
+          
+          const retryItem = retryData.data && retryData.data[0];
+          
+          // Check if we got "Too many attempts" - this means we hit rate limiting
+          if (retryItem?.reason === 5) {
+            console.log("[Login] Rate limiting triggered, stopping retries");
+            toast({
+              title: "Too many login attempts",
+              description: "Please wait 5 minutes before trying again.",
+              variant: "destructive",
+            });
+            return;
+          }
+          
+          if (retryData.status === true && retryItem?.status === 1) {
+            console.log("[Login] Retry successful on attempt " + retryCount);
+            processLoginSuccess(retryItem, values.identifier);
+            return;
+          } else {
+            console.log(`[Login] Retry ${retryCount} failed:`, retryItem?.msg);
+          }
+        }
+        
+        // All retries failed
+        const retryItem = data.data && data.data[0];
+        toast({
+          title: "Login failed",
+          description: retryItem?.msg || "Could not clear active session. Please try again in a moment.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Check for rate limiting (reason: 5 = "Too many attempts in the last 5 minutes")
+      if (dataItem?.status === 0 && dataItem?.reason === 5) {
+        console.log("[Login] Rate limiting triggered");
+        toast({
+          title: "Too many login attempts",
+          description: "Please wait 5 minutes before trying again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       const isSuccess = (data.status === true && dataItem?.status === 1) || 
-                        (dataItem?.facilityId && dataItem?.email);
+                        (dataItem?.facilityId && dataItem?.email && dataItem?.status === 1);
       
       if (isSuccess && dataItem) {
-        console.log("[Login] Authentication successful or already active!");
-        
-        // Use facilityId or entityId (handle both response formats)
-        const facilityId = String(dataItem.entityId || dataItem.facilityId);
-        const facilityName = dataItem.entityName || dataItem.name || values.identifier.split('@')[0] || "Facility";
-        
-        // Store facility ID (must be string)
-        if (facilityId && facilityId !== "undefined") {
-          localStorage.setItem("userFacilityId", facilityId);
-          localStorage.setItem("userEntityId", facilityId);
-          console.log("[Login] Facility ID stored:", facilityId);
-        }
-        
-        // Store token if present
-        if (dataItem.token) {
-          localStorage.setItem("authToken", dataItem.token);
-          console.log("[Login] Token stored in localStorage");
-        }
-        
-        // Store email for display purposes
-        localStorage.setItem("userEmail", values.identifier);
-        
-        // Store facility info
-        if (dataItem.entity) {
-          localStorage.setItem("userEntity", dataItem.entity);
-        }
-        
-        localStorage.setItem("userEntityName", facilityName);
-        
-        // Store accessible facilities list for authorization checks
-        if (dataItem.facilities && Array.isArray(dataItem.facilities)) {
-          localStorage.setItem("userFacilities", JSON.stringify(dataItem.facilities));
-          console.log("[Login] Facilities list stored:", dataItem.facilities);
-        }
-        
-        console.log("[Login] Facility info stored:", {
-          entity: dataItem.entity,
-          entityName: facilityName,
-          facilityId: facilityId,
-          facilities: dataItem.facilities,
-        });
-        
-        onLogin();
-        
-        // Show welcome message with facility name
-        toast({
-          title: `Welcome, ${facilityName}!`,
-          description: "You have successfully logged in.",
-        });
+        processLoginSuccess(dataItem, values.identifier);
       } else {
         console.log("[Login] Authentication failed:", dataItem?.msg);
         toast({
@@ -153,6 +188,66 @@ export default function Login({ onLogin }: LoginProps) {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function processLoginSuccess(dataItem: any, email: string) {
+    console.log("[Login] Authentication successful!");
+    
+    // Use facilityId or entityId (handle both response formats)
+    const facilityId = String(dataItem.entityId || dataItem.facilityId);
+    const facilityName = dataItem.entityName || dataItem.name || email.split('@')[0] || "Facility";
+    
+    // Store facility ID (must be string)
+    if (facilityId && facilityId !== "undefined") {
+      localStorage.setItem("userFacilityId", facilityId);
+      localStorage.setItem("userEntityId", facilityId);
+      console.log("[Login] Facility ID stored:", facilityId);
+    }
+    
+    // Store token if present
+    if (dataItem.token) {
+      localStorage.setItem("authToken", dataItem.token);
+      console.log("[Login] Token stored in localStorage");
+    }
+    
+    // Store email for display purposes
+    localStorage.setItem("userEmail", email);
+    
+    // Store facility info
+    if (dataItem.entity) {
+      localStorage.setItem("userEntity", dataItem.entity);
+    }
+    
+    localStorage.setItem("userEntityName", facilityName);
+    
+    // Store accessible facilities list for authorization checks
+    if (dataItem.facilities && Array.isArray(dataItem.facilities)) {
+      localStorage.setItem("userFacilities", JSON.stringify(dataItem.facilities));
+      console.log("[Login] Facilities list stored:", dataItem.facilities);
+    }
+    
+    console.log("[Login] Facility info stored:", {
+      entity: dataItem.entity,
+      entityName: facilityName,
+      facilityId: facilityId,
+      facilities: dataItem.facilities,
+    });
+    
+    // Dispatch custom event so App.tsx knows auth state changed
+    dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
+      facilityId,
+      email,
+      facilityName,
+      token: dataItem.token,
+    });
+    
+    onLogin();
+    
+    // Show welcome message with facility name
+    toast({
+      title: `Welcome, ${facilityName}!`,
+      description: "You have successfully logged in.",
+    });
   }
 
   return (

@@ -2,6 +2,30 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { createHash } from "crypto";
 import { storage } from "./storage";
+import { writeFileSync, appendFileSync } from "fs";
+import { join } from "path";
+import rateLimit from "express-rate-limit";
+
+const LOG_FILE = "/tmp/wounddatacenter-login.log";
+
+// Rate limiter for login attempts
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per IP (lenient for development)
+  message: "Too many login attempts, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      status: false,
+      error: "Too many login attempts. Please try again later.",
+    });
+  },
+  skip: (req) => {
+    // Skip rate limiting for GET requests
+    return req.method === "GET";
+  },
+});
 
 const fetchWithTimeout = (url: string, options: any, timeout: number = 5000) => {
   return Promise.race([
@@ -11,6 +35,35 @@ const fetchWithTimeout = (url: string, options: any, timeout: number = 5000) => 
     ),
   ]);
 };
+
+// Helper function to extract token from request and include in backend call
+function getAuthHeaders(req: any): Record<string, string> {
+  const headers: Record<string, string> = {};
+  
+  // Extract Authorization header from the incoming request
+  if (req.headers.authorization) {
+    headers["Authorization"] = req.headers.authorization;
+  }
+  
+  // Also extract facility ID from headers or body
+  const facilityId = req.headers["x-facility-id"] || req.body?.facilityId || req.query?.facility_id;
+  if (facilityId) {
+    headers["X-Facility-Id"] = facilityId.toString();
+  }
+  
+  return headers;
+}
+
+// Logging helper function
+function logLogin(message: string) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}\n`;
+  try {
+    appendFileSync(LOG_FILE, logMessage);
+  } catch (e) {
+    console.error("Failed to write log:", e);
+  }
+}
 
 // Hash password using SHA256
 function hashPasswordSHA256(password: string): string {
@@ -25,8 +78,8 @@ export async function registerRoutes(
 
   // ============= AUTHENTICATION ROUTES =============
   
-  app.post("/api/get", async (req, res) => {
-    const { entity, action, email, password, deviceId, ...rest } = req.body;
+  app.post("/api/get", loginLimiter, async (req, res) => {
+    const { entity, action, email, password, deviceId, name, ...rest } = req.body;
     
     try {
       // Support both 'entity' and 'action' parameters for backward compatibility
@@ -49,20 +102,17 @@ export async function registerRoutes(
       // Transform TryLogin to TryLoginFacilities for backend if needed
       const remoteEntity = requestedEntity === "TryLogin" ? "TryLoginFacilities" : requestedEntity;
       
-      // Hash the password with SHA256 before sending to backend
-      const hashedPassword = hashPasswordSHA256(password);
-      
+      // Send password as-is to backend (backend handles its own hashing/validation)
       const remotePayload = {
         entity: remoteEntity,
         email,
-        password: hashedPassword,
+        password,
         deviceId,
+        ...(name && { name }),
         ...rest,
       };
 
-      console.log("[/api/get] Client sent entity/action:", requestedEntity, "-> Backend receives:", remoteEntity);
-      console.log("[/api/get] Password hashed with SHA256");
-      console.log("[/api/get] Full payload:", { email: remotePayload.email, deviceId: remotePayload.deviceId, password: "***" });
+      logLogin(`[/api/get] Client sent entity/action: ${requestedEntity} -> Backend receives: ${remoteEntity}`);
 
       const remoteResponse = await fetchWithTimeout(
         "https://cubed-mr.app/api/get",
@@ -74,15 +124,10 @@ export async function registerRoutes(
       );
 
       if (!remoteResponse.ok) {
-        console.error("[/api/get] Backend returned status:", remoteResponse.status);
+        logLogin(`[/api/get] Backend returned status: ${remoteResponse.status}`);
       }
 
       const data = await remoteResponse.json();
-      console.log("[/api/get] Backend response:", { 
-        status: data.status, 
-        hasData: !!data.data,
-        dataLength: data.data?.length 
-      });
       
       res.json(data);
     } catch (error) {
@@ -92,27 +137,51 @@ export async function registerRoutes(
   });
 
   app.post("/api/logout", async (req, res) => {
-    const { email, facility_id } = req.body;
+    const { email, facility_id, deviceId } = req.body;
 
     try {
+      const logoutPayload = {
+        entity: "TryLogoutFacilities",
+        email,
+        deviceId: deviceId || "web-client",
+      };
+
       const remoteResponse = await fetchWithTimeout(
         "https://cubed-mr.app/api/get",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            entity: "facility-logout",
-            email,
-            facility_id,
-          }),
+          headers: { 
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(logoutPayload),
         }
       );
 
       const data = await remoteResponse.json();
-      res.json({ answer: true, code: "", ...data });
+      
+      // If first attempt fails, try with auth headers
+      if (data.error === "Unauthorized access" && req.headers.authorization) {
+        const authHeaders = getAuthHeaders(req);
+        const retryResponse = await fetchWithTimeout(
+          "https://cubed-mr.app/api/get",
+          {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              ...authHeaders,
+            },
+            body: JSON.stringify(logoutPayload),
+          }
+        );
+
+        const retryData = await retryResponse.json();
+        res.json({ answer: true, code: "", ...retryData });
+      } else {
+        res.json({ answer: true, code: "", ...data });
+      }
     } catch (error) {
       console.error("POST /api/logout error:", error);
-      res.status(500).json({ answer: false, error: "Server error" });
+      res.json({ answer: true, code: "", error: "Logout processed" });
     }
   });
 
@@ -121,6 +190,7 @@ export async function registerRoutes(
   // Support both GET (with header) and POST (with body)
   const facilityAcuityIndexHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facility_id || req.query?.facility_id;
+    const authHeaders = getAuthHeaders(req);
 
     if (!facilityId) {
       return res.status(400).json({ error: "Missing facility ID" });
@@ -131,7 +201,7 @@ export async function registerRoutes(
         `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
         {
           method: "GET",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
         }
       );
 
@@ -162,6 +232,7 @@ export async function registerRoutes(
   const etiologyDistributionHandler = async (req: any, res: any) => {
     // Get facility_id from header, body, or query
     const facilityId = req.headers["x-facility-id"] || req.body?.facility_id || req.query?.facility_id;
+    const authHeaders = getAuthHeaders(req);
     // Get date from body or query params
     const date = req.body?.date || req.query?.date || new Date().toISOString().split('T')[0];
 
@@ -174,7 +245,7 @@ export async function registerRoutes(
         `https://cubed-mr.app/api/reports/etiology-distribution/${facilityId}/${date}`,
         {
           method: "GET",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
         }
       );
 
@@ -204,6 +275,7 @@ export async function registerRoutes(
   const facilityWoundReportHandler = async (req: any, res: any) => {
     // Extract facility_id from header, body, or query params
     const facilityId = req.headers["x-facility-id"] || req.body?.facility_id || req.query?.facility_id;
+    const authHeaders = getAuthHeaders(req);
     
     // Extract dates from body or query params
     const startDate = req.body?.startDate || req.query?.startDate;
@@ -216,7 +288,7 @@ export async function registerRoutes(
     try {
       const remoteResponse = await fetchWithTimeout(
         `https://cubed-mr.app/api/reports/facility-wound-outcome/${facilityId}/${startDate}/${endDate}`,
-        { method: "GET", headers: { "Content-Type": "application/json" } }
+        { method: "GET", headers: { "Content-Type": "application/json", ...authHeaders } }
       );
       
       const backendData = await remoteResponse.json();
@@ -361,6 +433,10 @@ export async function registerRoutes(
   
   // Support both GET (with header) and POST (with body)
   const dashboardKpisHandler = async (req: any, res: any) => {
+    console.log(`\n=== /api/dashboard/kpis called ===`);
+    console.log(`Request headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`Authorization header present:`, !!req.headers.authorization);
+    
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     
     if (!facilityId) {
@@ -369,6 +445,9 @@ export async function registerRoutes(
 
     try {
       const today = new Date();
+      const authHeaders = getAuthHeaders(req);
+      console.log(`[/api/dashboard/kpis] authHeaders returned:`, authHeaders);
+      console.log(`[/api/dashboard/kpis] Authorization header to forward:`, authHeaders.Authorization ? `present (${authHeaders.Authorization.substring(0, 30)}...)` : "MISSING ⚠️");
       
       // Define date range fallback strategy: 30d → 90d → 180d → 365d
       const dateRanges = [
@@ -390,13 +469,17 @@ export async function registerRoutes(
         const endDateStr = today.toISOString().split('T')[0];
         
         console.log(`[/api/dashboard/kpis] Trying ${range.label} (${startDateStr} to ${endDateStr})`);
+        logLogin(`[/api/dashboard/kpis] Auth headers being sent: Authorization=${authHeaders.Authorization ? 'present' : 'missing'}, X-Facility-Id=${authHeaders['X-Facility-Id']}`);
         
         try {
           const woundOutcomeResponse = await fetchWithTimeout(
             `https://cubed-mr.app/api/reports/facility-wound-outcome/${facilityId}/${startDateStr}/${endDateStr}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                ...authHeaders,
+              },
             }
           );
 
@@ -427,7 +510,10 @@ export async function registerRoutes(
             `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                ...authHeaders,
+              },
             }
           );
 
@@ -525,48 +611,14 @@ export async function registerRoutes(
   }
 
   // Helper function to build etiology distribution from raw wounds
-  const buildEtiologyFromWounds = async (facilityId: string) => {
-    try {
-      const woundsResponse = await fetchWithTimeout(
-        `https://cubed-mr.app/api/facilities/${facilityId}/wounds`,
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-      if (!woundsResponse.ok) {
-        return null;
-      }
-
-      const woundsData = await woundsResponse.json();
-      const wounds = Array.isArray(woundsData) ? woundsData : woundsData.data || [];
-
-      if (!wounds.length) return null;
-
-      // Aggregate wounds by etiology
-      const etiologyMap: Record<string, number> = {};
-      wounds.forEach((wound: any) => {
-        const etiology = wound.etiology || wound.woundEtiology || "Unknown";
-        etiologyMap[etiology] = (etiologyMap[etiology] || 0) + 1;
-      });
-
-      // Convert to array format
-      const etiologyArray = Object.entries(etiologyMap).map(([name, count]) => ({
-        name,
-        value: count,
-        fill: undefined // Will be set by transformToEtiologyFormat
-      }));
-
-      return etiologyArray;
-    } catch (error) {
-      console.warn(`[buildEtiologyFromWounds] Error:`, error);
-      return null;
-    }
-  };
+  // Note: buildEtiologyFromWounds was removed because /api/facilities/{id}/wounds endpoint
+  // does not exist on the backend. See BACKEND_AVAILABLE_ENDPOINTS.md for available endpoints.
 
   const dashboardEtiologyHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
+    const authHeaders = getAuthHeaders(req);
+    
+    console.log(`[/api/dashboard/wound-etiology] Called with facilityId: ${facilityId}`);
     
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -592,41 +644,39 @@ export async function registerRoutes(
         startDate.setDate(startDate.getDate() - range.days);
         const endDate = today.toISOString().split('T')[0];
         
-        console.log(`[/api/dashboard/wound-etiology] Trying ${range.label} (${endDate})`);
         try {
           const remoteResponse = await fetchWithTimeout(
             `https://cubed-mr.app/api/reports/etiology-distribution/${facilityId}/${endDate}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
             }
           );
 
           if (remoteResponse.ok) {
             const etiologyDistribution = await remoteResponse.json();
+            
             if (etiologyDistribution.data && etiologyDistribution.data.length > 0) {
               backendData = etiologyDistribution;
               usedPeriod = range.label;
-              console.log(`[/api/dashboard/wound-etiology] ✅ Found data for ${range.label}`);break;
+              console.log(`[/api/dashboard/wound-etiology] ✅ Found ${etiologyDistribution.data.length} etiology items for ${range.label}`);
+              break;
             }
           }
         } catch (err) {
-          console.log(`[/api/dashboard/wound-etiology] Error trying ${range.label}:`, (err as Error).message);
+          // Continue to next date range
         }
       }
 
-      // If etiology endpoint returns empty, try building from raw wounds
+      // If no etiology data found, that's OK - just return empty
+      // Note: There is no /api/facilities/{id}/wounds endpoint available on the backend
+      // so we cannot build etiology from raw wounds
       if (!backendData?.data || backendData.data.length === 0) {
-        console.log(`[/api/dashboard/wound-etiology] No etiology data, building from raw wounds...`);const etiologyFromWounds = await buildEtiologyFromWounds(facilityId);
-        if (etiologyFromWounds) {
-          backendData = { data: etiologyFromWounds };
-          usedPeriod = "Fallback";
-        }
+        console.log(`[/api/dashboard/wound-etiology] ℹ️ No backend etiology data available for facility ${facilityId}`);
+        backendData = { data: [] };
       }
 
       const etiologyData = transformToEtiologyFormat(backendData || { data: [] });
-      console.log(`[/api/dashboard/wound-etiology] Transformed etiology:`, etiologyData);
-      
       res.json(etiologyData);
     } catch (error) {
       console.error("/api/dashboard/wound-etiology error:", error);
@@ -712,6 +762,7 @@ export async function registerRoutes(
 
   const dashboardWoundReductionHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
+    const authHeaders = getAuthHeaders(req);
     
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -744,7 +795,7 @@ export async function registerRoutes(
             `https://cubed-mr.app/api/reports/facility-wound-outcome/${facilityId}/${startDateStr}/${endDateStr}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
             }
           );
 
@@ -768,7 +819,7 @@ export async function registerRoutes(
             `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
             }
           );
 
@@ -853,6 +904,7 @@ export async function registerRoutes(
 
   const dashboardHealingStatusHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
+    const authHeaders = getAuthHeaders(req);
     
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -885,7 +937,7 @@ export async function registerRoutes(
             `https://cubed-mr.app/api/reports/facility-wound-outcome/${facilityId}/${startDateStr}/${endDateStr}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
             }
           );
 
@@ -909,7 +961,7 @@ export async function registerRoutes(
             `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
             {
               method: "GET",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
             }
           );
 
@@ -976,6 +1028,7 @@ export async function registerRoutes(
 
   const dashboardWoundsByStatusHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
+    const authHeaders = getAuthHeaders(req);
     
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -986,7 +1039,7 @@ export async function registerRoutes(
         `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
         {
           method: "GET",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
         }
       );
 
@@ -1015,6 +1068,7 @@ export async function registerRoutes(
   
   app.post("/api/report", async (req, res) => {
     const { reportName, facilityId, status, email } = req.body;
+    const authHeaders = getAuthHeaders(req);
 
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -1041,7 +1095,7 @@ export async function registerRoutes(
 
       const remoteResponse = await fetchWithTimeout(remoteUrl, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
       });
 
       if (!remoteResponse.ok) {
@@ -1058,6 +1112,19 @@ export async function registerRoutes(
       console.error(`/api/report error for ${reportName}:`, error);
       res.status(500).json({ status: false, error: "Failed to fetch report" });
     }
+  });
+
+  // Debug endpoint to verify headers are being sent
+  app.get("/api/debug/headers", (req, res) => {
+    const authHeaders = getAuthHeaders(req);
+    console.log("\n=== DEBUG: /api/debug/headers ===");
+    console.log("All request headers:", req.headers);
+    console.log("Extracted authHeaders:", authHeaders);
+    res.json({
+      allHeaders: req.headers,
+      extractedAuthHeaders: authHeaders,
+      authorizationPresent: !!req.headers.authorization,
+    });
   });
 
   return httpServer;

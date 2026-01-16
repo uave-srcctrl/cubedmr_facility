@@ -22,8 +22,30 @@ import { EcgLoader } from "@/components/ecg-loader";
 import { useState, useEffect } from "react";
 
 export default function Dashboard() {
-  const { getAuthInfo } = useAuth();
+  console.log('[Dashboard] 🎯 Dashboard component mounted!');
+  
+  const { getAuthInfo, getToken } = useAuth();
   const authInfo = getAuthInfo();
+  
+  console.log('[Dashboard] Initial authInfo from hook:', authInfo);
+  
+  // Use state and effect to ensure token is available after mount
+  const [token, setToken] = useState<string | null>(null);
+  const [tokenReady, setTokenReady] = useState(false);
+  
+  useEffect(() => {
+    // Increase delay to ensure localStorage is fully synchronized
+    // Sometimes it takes longer for state updates to propagate
+    const timer = setTimeout(() => {
+      const authToken = getToken();
+      setToken(authToken);
+      setTokenReady(true);
+      console.log('[Dashboard] ✅ Token ready from localStorage:', authToken ? `present (${authToken.substring(0, 20)}...)` : 'MISSING ⚠️');
+      console.log('[Dashboard] Auth info:', authInfo);
+    }, 200);  // Increased from 50ms to 200ms
+    
+    return () => clearTimeout(timer);
+  }, []);
   
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!authInfo.facilityId) {
@@ -61,6 +83,11 @@ export default function Dashboard() {
   const [etiologyChartKey, setEtiologyChartKey] = useState(0);
 
   useEffect(() => {
+    if (!tokenReady) {
+      console.log('[Dashboard] Waiting for token to be ready...');
+      return; // Don't fetch until token is ready
+    }
+    
     const fetchKPIs = async () => {
       try {
         const facilityId = authInfo.facilityId;
@@ -76,7 +103,14 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "X-Facility-Id": facilityId,
         };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+          console.log('[Dashboard/KPIs] Including Authorization header');
+        } else {
+          console.warn('[Dashboard/KPIs] ⚠️ NO TOKEN AVAILABLE!');
+        }
 
+        console.log('[Dashboard/KPIs] Fetching with headers:', Object.keys(headers));
         const response = await fetch(LOCAL_API.DASHBOARD_KPIS, { 
           method: "GET",
           headers 
@@ -115,7 +149,7 @@ export default function Dashboard() {
     };
 
     fetchKPIs();
-  }, [authInfo.facilityId]);
+  }, [authInfo.facilityId, tokenReady]);
 
   // Fetch wound etiology data
   useEffect(() => {
@@ -134,6 +168,9 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "X-Facility-Id": facilityId,
         };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
 
         const response = await fetch(LOCAL_API.DASHBOARD_WOUND_ETIOLOGY, { 
           method: "GET",
@@ -175,8 +212,12 @@ export default function Dashboard() {
       }
     };
 
+    if (!tokenReady) {
+      console.log('[Dashboard] Etiology: Waiting for token to be ready');
+      return;
+    }
     fetchEtiologyData();
-  }, [authInfo.facilityId]);
+  }, [authInfo.facilityId, tokenReady]);
 
   // Trigger animation when etiology data finishes loading
   useEffect(() => {
@@ -202,6 +243,9 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "X-Facility-Id": facilityId,
         };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
 
         const response = await fetch(LOCAL_API.DASHBOARD_WOUND_REDUCTION, { 
           method: "GET",
@@ -241,8 +285,12 @@ export default function Dashboard() {
       }
     };
 
+    if (!tokenReady) {
+      console.log('[Dashboard] Reduction: Waiting for token to be ready');
+      return;
+    }
     fetchReductionData();
-  }, [authInfo.facilityId]);
+  }, [authInfo.facilityId, tokenReady]);
 
   // Fetch healing status data
   useEffect(() => {
@@ -261,6 +309,9 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "X-Facility-Id": facilityId,
         };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
 
         const response = await fetch(LOCAL_API.DASHBOARD_HEALING_STATUS, { 
           method: "GET",
@@ -300,8 +351,12 @@ export default function Dashboard() {
       }
     };
 
+    if (!tokenReady) {
+      console.log('[Dashboard] Healing Status: Waiting for token to be ready');
+      return;
+    }
     fetchHealingStatusData();
-  }, [authInfo.facilityId]);
+  }, [authInfo.facilityId, tokenReady]);
 
   // Fetch wounds by status data using report API
   // No fallback to mock data - show no-data component if backend returns empty
@@ -322,12 +377,17 @@ export default function Dashboard() {
         // Use the new /api/report endpoint to fetch rptWoundsByStatus
         console.log('[Dashboard] Fetching wounds by status using /api/report endpoint for facility:', facilityId);
         
+        const reportHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Facility-Id': facilityId,
+        };
+        if (token) {
+          reportHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        
         const response = await fetch(LOCAL_API.REPORT, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Facility-Id': facilityId,
-          },
+          headers: reportHeaders,
           body: JSON.stringify({
             entity: 'Report',
             reportName: 'rptWoundsByStatus',
@@ -375,8 +435,12 @@ export default function Dashboard() {
       }
     };
 
+    if (!tokenReady) {
+      console.log('[Dashboard] Wounds by Status: Waiting for token to be ready');
+      return;
+    }
     fetchWoundsByStatusData();
-  }, [authInfo.facilityId, authInfo.email, authInfo.token]);
+  }, [authInfo.facilityId, authInfo.email, authInfo.token, tokenReady]);
 
   // Get KPI values from the object
   // Note: Backend returns objects with structure: { value, trend, label, period }
