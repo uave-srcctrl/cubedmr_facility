@@ -15,8 +15,17 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Activity, Lock } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
+
+// Helper function to compute SHA256 hash
+async function sha256(str: string): Promise<string> {
+  const buffer = new TextEncoder().encode(str);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 const formSchema = z.object({
   identifier: z.string().email("Please enter a valid email address."),
@@ -46,7 +55,7 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       // Facility login by email
       const email = values.identifier;
-      const entity = "TryLoginFacilities";
+      const entity = "TryLogin";
       
       // Generate a device ID if not already in localStorage
       let deviceId = localStorage.getItem("deviceId");
@@ -57,6 +66,18 @@ export default function Login({ onLogin }: LoginProps) {
 
       console.log("[Login] Submitting facility login with email:", email, "- Entity:", entity, "- DeviceId:", deviceId);
       
+      // Replicate EXACT Dart flow:
+      // Step 1: In authenticate(), Dart does: SHA256(password)
+      const firstHash = await sha256(values.password);
+      console.log("[Login] Step 1 - SHA256(password):", firstHash);
+      
+      // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
+      const salt = `${email}38457487${deviceId}`;
+      const encountertrackid = await sha256(salt);
+      console.log("[Login] Step 2 - SHA256(salt):", encountertrackid);
+      console.log("[Login] Step 2 - Salt formula: email + '38457487' + deviceId");
+      console.log("[Login] Step 2 - Salt value:", salt);
+      
       const response = await fetch(LOCAL_API.LOGIN, {
         method: "POST",
         headers: {
@@ -65,9 +86,10 @@ export default function Login({ onLogin }: LoginProps) {
         body: JSON.stringify({
           action: entity,
           email: email,
-          password: values.password,
-          name: email,
+          password: firstHash,  // Step 1 hash
           deviceId: deviceId,
+          name: email,
+          encountertrackid: encountertrackid,  // Step 2 hash (from getData)
         }),
       });
 
@@ -101,6 +123,10 @@ export default function Login({ onLogin }: LoginProps) {
           
           console.log(`[Login] Retry ${retryCount}/${maxRetries} with device ID:`, newDeviceId);
           
+          // Recalculate hashes for new deviceId
+          const newSalt = `${email}38457487${newDeviceId}`;
+          const newEncountertrackid = await sha256(newSalt);
+          
           // Wait a bit before retrying
           await new Promise(resolve => setTimeout(resolve, 300));
           
@@ -112,9 +138,10 @@ export default function Login({ onLogin }: LoginProps) {
             body: JSON.stringify({
               action: entity,
               email: email,
-              password: values.password,
+              password: firstHash,
               name: email,
               deviceId: newDeviceId,
+              encountertrackid: newEncountertrackid,
             }),
           });
           
@@ -193,44 +220,32 @@ export default function Login({ onLogin }: LoginProps) {
   function processLoginSuccess(dataItem: any, email: string) {
     console.log("[Login] Authentication successful!");
     
+    // Import useAuth to use setAuth and setAvailableFacilities
+    const { setAuth, setAvailableFacilities } = useAuth();
+    
     // Use facilityId or entityId (handle both response formats)
     const facilityId = String(dataItem.entityId || dataItem.facilityId);
     const facilityName = dataItem.entityName || dataItem.name || email.split('@')[0] || "Facility";
     
-    // Store facility ID (must be string)
-    if (facilityId && facilityId !== "undefined") {
-      localStorage.setItem("userFacilityId", facilityId);
-      localStorage.setItem("userEntityId", facilityId);
-      console.log("[Login] Facility ID stored:", facilityId);
-    }
+    // Process facilities array
+    const facilities = dataItem.facilities || [];
+    console.log("[Login] Facilities received:", facilities.length > 0 ? facilities : "none");
     
-    // Store token if present
-    if (dataItem.token) {
-      localStorage.setItem("authToken", dataItem.token);
-      console.log("[Login] Token stored in localStorage");
-    }
+    // Store auth info using setAuth
+    setAuth(
+      dataItem.token || "",
+      email,
+      dataItem.entity,
+      facilityName,
+      facilityId,
+      facilityId && facilityId !== "undefined" ? facilityId : null,
+      facilities.length > 0 ? facilities : []
+    );
     
-    // Store email for display purposes
-    localStorage.setItem("userEmail", email);
-    
-    // Store facility info
-    if (dataItem.entity) {
-      localStorage.setItem("userEntity", dataItem.entity);
-    }
-    
-    localStorage.setItem("userEntityName", facilityName);
-    
-    // Store accessible facilities list for authorization checks
-    if (dataItem.facilities && Array.isArray(dataItem.facilities)) {
-      localStorage.setItem("userFacilities", JSON.stringify(dataItem.facilities));
-      console.log("[Login] Facilities list stored:", dataItem.facilities);
-    }
-    
-    console.log("[Login] Facility info stored:", {
-      entity: dataItem.entity,
-      entityName: facilityName,
-      facilityId: facilityId,
-      facilities: dataItem.facilities,
+    console.log("[Login] Auth info stored:", {
+      email,
+      facilityId,
+      facilitiesCount: facilities.length,
     });
     
     // Dispatch custom event so App.tsx knows auth state changed

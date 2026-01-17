@@ -99,12 +99,9 @@ export async function registerRoutes(
         });
       }
 
-      // Transform TryLogin to TryLoginFacilities for backend if needed
-      const remoteEntity = requestedEntity === "TryLogin" ? "TryLoginFacilities" : requestedEntity;
-      
-      // Send password as-is to backend (backend handles its own hashing/validation)
+      // Send payload to backend as-is (no entity transformation)
       const remotePayload = {
-        entity: remoteEntity,
+        entity: requestedEntity,
         email,
         password,
         deviceId,
@@ -112,7 +109,7 @@ export async function registerRoutes(
         ...rest,
       };
 
-      logLogin(`[/api/get] Client sent entity/action: ${requestedEntity} -> Backend receives: ${remoteEntity}`);
+      logLogin(`[/api/get] Client sent entity/action: ${requestedEntity}`);
 
       const remoteResponse = await fetchWithTimeout(
         "https://cubed-mr.app/api/get",

@@ -12,6 +12,7 @@ import FacilityWoundReport from "@/pages/facility-wound-report";
 import OutcomeReportGlobal from "@/pages/outcome-report";
 import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
+import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
@@ -50,7 +51,10 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 }
 
 function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean; user: any; onLogout: () => void }) {
-  console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'user:', user ? 'present' : 'null');
+  const { isFacilitySelected } = useAuth();
+  const facilitySelected = isFacilitySelected();
+
+  console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected);
   
   if (!isAuthenticated) {
     console.log('[Router] NOT authenticated - showing Login component');
@@ -59,6 +63,12 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
       console.log("[Router] Login detected, waiting for auth state update...");
       // App.tsx will automatically detect the auth state change via the interval
     }} />; 
+  }
+
+  // Si autenticado pero SIN facility seleccionada, mostrar selector
+  if (!facilitySelected) {
+    console.log('[Router] Authenticated but no facility selected - showing FacilitySelectorPage');
+    return <FacilitySelectorPage />;
   }
 
   console.log('[Router] AUTHENTICATED - showing Dashboard in Layout');
@@ -71,6 +81,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
         <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
         <Route path="/facility/etiology-report" component={EtiologyReport} />
         <Route path="/facility/acuity-report" component={AcuityReport} />
+        <Route path="/facility-selector" component={FacilitySelectorPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

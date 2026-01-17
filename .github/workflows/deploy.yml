@@ -1,0 +1,227 @@
+name: 🚀 Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: 📋 Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
+      - name: 🔍 Install dependencies
+        run: npm install --production=false
+      
+      - name: ✅ Type check
+        run: npm run check
+      
+      - name: 🔨 Build application
+        run: npm run build
+        env:
+          NODE_ENV: production
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://cubed-mr.app' }}
+      
+      - name: 📝 Get commit info
+        id: commit
+        run: |
+          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+      
+      - name: 📦 Create deployment package
+        run: |
+          mkdir -p deploy-package
+          cp -r dist/ deploy-package/
+          cp -r migrations/ deploy-package/ 2>/dev/null || true
+          cp package.json package-lock.json ecosystem.config.js deploy-package/
+          tar -czf facility-deploy.tar.gz deploy-package/
+          rm -rf deploy-package
+          ls -lh facility-deploy.tar.gz
+      
+      - name: 🔐 Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: 📤 Upload deployment package
+        run: |
+          scp -P 22 facility-deploy.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/
+      
+      - name: 🚀 Deploy on remote server
+        run: |
+          ssh -p 22 ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          set -e
+          
+          DEPLOY_PATH="/var/www/facility"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          
+          echo "📋 Deploying to: $DEPLOY_PATH"
+          cd $DEPLOY_PATH || exit 1
+          
+          echo "⏹️  Stopping application..."
+          pm2 stop facility 2>/dev/null || true
+          
+          echo "💾 Creating backup..."
+          mkdir -p backups
+          if [ -d "dist" ]; then
+            cp -r dist "backups/dist-${TIMESTAMP}"
+            echo "✅ Backup created: backups/dist-${TIMESTAMP}"
+          fi
+          
+          echo "📦 Extracting new files..."
+          tar -xzf /tmp/facility-deploy.tar.gz -C .
+          mv deploy-package/* . 2>/dev/null || true
+          rm -rf deploy-package /tmp/facility-deploy.tar.gz
+          
+          echo "📥 Installing dependencies..."
+          npm install --production
+          
+          echo "🚀 Starting application..."
+          pm2 start ecosystem.config.js 2>/dev/null || pm2 restart facility
+          pm2 save
+          
+          echo "⏳ Waiting for application to start..."
+          sleep 3
+          
+          echo "📊 Application status:"
+          pm2 status facility
+          
+          echo "✅ Deployment completed successfully!"
+          EOF
+      
+      - name: 🔍 Verify deployment
+        run: |
+          echo "⏳ Waiting for application to be ready..."
+          sleep 5
+          
+          echo "🔍 Checking health endpoint..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/api/health 2>/dev/null || echo "000")
+          
+          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; then
+            echo "✅ Application is responding (HTTP $HTTP_STATUS)"
+          else
+            echo "⚠️  Health check returned: $HTTP_STATUS (application may be warming up)"
+          fi
+      
+      - name: 📢 Notify Slack - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "✅ Deploy Successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*✅ Deploy to Production*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}\n*URL:* https://facility.com"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Commit Message:*\n```${{ steps.commit.outputs.message }}```"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Build"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Site"
+                      },
+                      "url": "https://facility.com"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      
+      - name: 📢 Notify Slack - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "❌ Deploy Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ Deploy to Production FAILED*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Logs"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          rm -f facility-deploy.tar.gz
+          rm -f ~/.ssh/id_rsa

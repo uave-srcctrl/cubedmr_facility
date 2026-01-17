@@ -7,6 +7,7 @@ export const AUTH_EVENTS = {
   LOGIN: 'auth:login',
   LOGOUT: 'auth:logout',
   AUTH_READY: 'auth:ready',
+  FACILITY_CHANGED: 'auth:facility_changed',
 };
 
 export function dispatchAuthEvent(eventName: string, detail?: any) {

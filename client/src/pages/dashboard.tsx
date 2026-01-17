@@ -24,10 +24,12 @@ import { useState, useEffect } from "react";
 export default function Dashboard() {
   console.log('[Dashboard] 🎯 Dashboard component mounted!');
   
-  const { getAuthInfo, getToken } = useAuth();
+  const { getAuthInfo, getToken, getSelectedFacility } = useAuth();
   const authInfo = getAuthInfo();
+  const selectedFacilityId = getSelectedFacility();
   
   console.log('[Dashboard] Initial authInfo from hook:', authInfo);
+  console.log('[Dashboard] Selected facility ID:', selectedFacilityId);
   
   // Use state and effect to ensure token is available after mount
   const [token, setToken] = useState<string | null>(null);
@@ -48,14 +50,14 @@ export default function Dashboard() {
   }, []);
   
   // If no facilityId, show error - shouldn't happen if auth is working
-  if (!authInfo.facilityId) {
+  if (!selectedFacilityId) {
     return (
       <div className="space-y-6">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Authentication Error</AlertTitle>
           <AlertDescription>
-            Missing facility information. Please log in again.
+            Missing facility selection. Please select a facility from the menu.
           </AlertDescription>
         </Alert>
       </div>
@@ -90,7 +92,7 @@ export default function Dashboard() {
     
     const fetchKPIs = async () => {
       try {
-        const facilityId = authInfo.facilityId;
+        const facilityId = selectedFacilityId;
         if (!facilityId) {
           console.warn('[Dashboard] No facilityId found');
           setDashboardKPIs(null);
@@ -110,7 +112,7 @@ export default function Dashboard() {
           console.warn('[Dashboard/KPIs] ⚠️ NO TOKEN AVAILABLE!');
         }
 
-        console.log('[Dashboard/KPIs] Fetching with headers:', Object.keys(headers));
+        console.log('[Dashboard/KPIs] Fetching with selectedFacilityId:', facilityId);
         const response = await fetch(LOCAL_API.DASHBOARD_KPIS, { 
           method: "GET",
           headers 

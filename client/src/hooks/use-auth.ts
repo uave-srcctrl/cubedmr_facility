@@ -1,7 +1,17 @@
 import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
+interface Facility {
+  id: string;
+  name: string;
+  patients?: number;
+  activePatients?: number;
+  [key: string]: any;
+}
+
 export function useAuth() {
+  // ==================== GETTERS ====================
+
   function getToken(): string | null {
     if (typeof window === "undefined") return null;
     return localStorage.getItem("authToken");
@@ -17,9 +27,9 @@ export function useAuth() {
     return localStorage.getItem("userFacilityId");
   }
 
-  function getFacilities(): string[] {
+  function getFacilities(): Facility[] {
     if (typeof window === "undefined") return [];
-    const facilitiesJson = localStorage.getItem("userFacilities");
+    const facilitiesJson = localStorage.getItem("availableFacilities");
     if (!facilitiesJson) return [];
     try {
       return JSON.parse(facilitiesJson);
@@ -43,10 +53,56 @@ export function useAuth() {
     return localStorage.getItem("userEntityId");
   }
 
+  // ==================== FACILITY SELECTION METHODS ====================
+
+  function getSelectedFacility(): string | null {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("selectedFacilityId");
+  }
+
+  function setSelectedFacility(facilityId: string): void {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("selectedFacilityId", facilityId);
+    
+    // Dispatch evento para que componentes se actualicen
+    dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED);
+  }
+
+  function getSelectedFacilityInfo(): Facility | null {
+    const selectedId = getSelectedFacility();
+    if (!selectedId) return null;
+    
+    const facilities = getFacilities();
+    return facilities.find(f => f.id === selectedId) || null;
+  }
+
+  function getAvailableFacilities(): Facility[] {
+    if (typeof window === "undefined") return [];
+    const facilitiesJson = localStorage.getItem("availableFacilities");
+    if (!facilitiesJson) return [];
+    try {
+      return JSON.parse(facilitiesJson);
+    } catch {
+      return [];
+    }
+  }
+
+  function setAvailableFacilities(facilities: Facility[]): void {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("availableFacilities", JSON.stringify(facilities));
+  }
+
+  // ==================== AUTH STATE CHECKS ====================
+
   function isAuthenticated(): boolean {
     // Facility login now uses facilityId
     const facilityId = getFacilityId();
     return facilityId !== null && facilityId !== "";
+  }
+
+  function isFacilitySelected(): boolean {
+    const selectedFacilityId = getSelectedFacility();
+    return selectedFacilityId !== null && selectedFacilityId !== "";
   }
 
   async function logout(): Promise<void> {
@@ -79,7 +135,7 @@ export function useAuth() {
     }
   }
 
-  function setAuth(token: string, email: string, entity?: string, entityName?: string, entityId?: string, facilityId?: string, facilities?: string[]): void {
+  function setAuth(token: string, email: string, entity?: string, entityName?: string, entityId?: string, facilityId?: string | null, facilities?: Facility[]): void {
     if (typeof window === "undefined") return;
     localStorage.setItem("authToken", token);
     localStorage.setItem("userEmail", email);
@@ -87,7 +143,8 @@ export function useAuth() {
     if (entityName) localStorage.setItem("userEntityName", entityName);
     if (entityId) localStorage.setItem("userEntityId", entityId);
     if (facilityId) localStorage.setItem("userFacilityId", facilityId);
-    if (facilities) localStorage.setItem("userFacilities", JSON.stringify(facilities));
+    if (facilityId === null) localStorage.removeItem("userFacilityId");
+    if (facilities) setAvailableFacilities(facilities);
   }
 
   function clearAuth(): void {
@@ -100,6 +157,8 @@ export function useAuth() {
     localStorage.removeItem("userEntityId");
     localStorage.removeItem("userFacilityId");
     localStorage.removeItem("userFacilities");
+    localStorage.removeItem("selectedFacilityId");
+    localStorage.removeItem("availableFacilities");
     
     // Dispatch logout event
     dispatchAuthEvent(AUTH_EVENTS.LOGOUT);
@@ -112,7 +171,8 @@ export function useAuth() {
     entityName: string | null;
     entityId: string | null;
     facilityId: string | null;
-    facilities: string[];
+    selectedFacilityId: string | null;
+    facilities: Facility[];
   } {
     return {
       token: getToken(),
@@ -121,7 +181,8 @@ export function useAuth() {
       entityName: getEntityName(),
       entityId: getEntityId(),
       facilityId: getFacilityId(),
-      facilities: getFacilities(),
+      selectedFacilityId: getSelectedFacility(),
+      facilities: getAvailableFacilities(),
     };
   }
 
@@ -134,6 +195,12 @@ export function useAuth() {
     getEntityName,
     getEntityId,
     isAuthenticated,
+    isFacilitySelected,
+    getSelectedFacility,
+    setSelectedFacility,
+    getSelectedFacilityInfo,
+    getAvailableFacilities,
+    setAvailableFacilities,
     logout,
     setAuth,
     clearAuth,
