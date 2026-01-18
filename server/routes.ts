@@ -85,38 +85,82 @@ export async function registerRoutes(
       // Support both 'entity' and 'action' parameters for backward compatibility
       const requestedEntity = entity || action;
       
-      // Validate that we have the required authentication parameters
-      if (!requestedEntity || !email || !password || !deviceId) {
+      // Validate required parameters based on entity type
+      if (!requestedEntity || !email) {
         console.error("[/api/get] Missing required parameters:", { 
           entity: requestedEntity, 
-          email, 
-          password: password ? "***" : undefined,
-          deviceId 
+          email
         });
         return res.status(400).json({ 
           status: false, 
-          error: "Missing required parameter: deviceId" 
+          error: "Missing required parameters: entity and email" 
         });
+      }
+      
+      // For login (TryLogin), require password and deviceId
+      if (requestedEntity === "TryLogin") {
+        if (!password || !deviceId) {
+          console.error("[/api/get] Missing login parameters:", { 
+            password: password ? "***" : undefined,
+            deviceId 
+          });
+          return res.status(400).json({ 
+            status: false, 
+            error: "Missing required login parameters: password and deviceId" 
+          });
+        }
+      }
+      
+      // For other entities, require Authorization header (token)
+      if (requestedEntity !== "TryLogin") {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+          console.error("[/api/get] Missing or invalid Authorization header for entity:", requestedEntity);
+          return res.status(401).json({ 
+            status: false, 
+            error: "Authorization required for this operation" 
+          });
+        }
+        // Extract token
+        const token = authHeader.substring(7); // Remove "Bearer "
+        remotePayload.providertrackid = token;
       }
 
       // Send payload to backend as-is (no entity transformation)
       const remotePayload = {
         entity: requestedEntity,
         email,
-        password,
-        deviceId,
+        ...(password && { password }),
+        ...(deviceId && { deviceId }),
         ...(name && { name }),
         ...rest,
       };
 
       logLogin(`[/api/get] Client sent entity/action: ${requestedEntity}`);
+      logLogin(`[/api/get] Remote payload: ${JSON.stringify(remotePayload)}`);
+
+      let body;
+      let headers = {};
+      
+      if (requestedEntity === "TryLogin" || requestedEntity === "EntityInfo" || requestedEntity === "GroupsByUser") {
+        // For login and user data, use JSON
+        body = JSON.stringify(remotePayload);
+        headers = { "Content-Type": "application/json" };
+      } else {
+        // For other entities, use FormData
+        const formData = new FormData();
+        for (const key in remotePayload) {
+          formData.append(key, remotePayload[key]);
+        }
+        body = formData;
+      }
 
       const remoteResponse = await fetchWithTimeout(
         "https://cubed-mr.app/api/get",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(remotePayload),
+          headers: headers,
+          body: body,
         }
       );
 
@@ -124,7 +168,16 @@ export async function registerRoutes(
         logLogin(`[/api/get] Backend returned status: ${remoteResponse.status}`);
       }
 
-      const data = await remoteResponse.json();
+      let data;
+      try {
+        data = await remoteResponse.json();
+      } catch (e) {
+        const text = await remoteResponse.text();
+        logLogin(`[/api/get] Backend returned non-JSON response: ${text.substring(0, 500)}`);
+        return res.status(500).json({ status: false, error: "Backend returned invalid response" });
+      }
+      
+      logLogin(`[/api/get] Backend response: ${JSON.stringify(data)}`);
       
       res.json(data);
     } catch (error) {

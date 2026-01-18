@@ -24,6 +24,11 @@ export const LOCAL_API = {
   USER_PROFILE: `${LOCAL_API_BASE}/user/profile`,
   FACILITY_METADATA: `${LOCAL_API_BASE}/facility/metadata`,
   
+  // Flutter-like endpoints for user data and facilities (all use /api/get)
+  ENTITY_INFO: `${LOCAL_API_BASE}/get`, // For EntityInfo entity
+  GROUPS_BY_USER: `${LOCAL_API_BASE}/get`, // For GroupsByUser entity
+  FACILITIES_LIST: `${LOCAL_API_BASE}/get`, // For Facility entity list
+  
   // Reports (new endpoint for handling report requests)
   REPORT: `${LOCAL_API_BASE}/report`,
   

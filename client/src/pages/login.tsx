@@ -220,8 +220,8 @@ export default function Login({ onLogin }: LoginProps) {
   function processLoginSuccess(dataItem: any, email: string) {
     console.log("[Login] Authentication successful!");
     
-    // Import useAuth to use setAuth and setAvailableFacilities
-    const { setAuth, setAvailableFacilities } = useAuth();
+    // Import useAuth functions including new Flutter-like functions
+    const { setAuth, loadUser, getFacilities } = useAuth();
     
     // Use facilityId or entityId (handle both response formats)
     const facilityId = String(dataItem.entityId || dataItem.facilityId);
@@ -229,9 +229,9 @@ export default function Login({ onLogin }: LoginProps) {
     
     // Process facilities array
     const facilities = dataItem.facilities || [];
-    console.log("[Login] Facilities received:", facilities.length > 0 ? facilities : "none");
+    console.log("[Login] Facilities received from login:", facilities.length > 0 ? facilities : "none");
     
-    // Store auth info using setAuth
+    // Store initial auth info using setAuth
     setAuth(
       dataItem.token || "",
       email,
@@ -242,27 +242,83 @@ export default function Login({ onLogin }: LoginProps) {
       facilities.length > 0 ? facilities : []
     );
     
-    console.log("[Login] Auth info stored:", {
+    console.log("[Login] Initial auth info stored:", {
       email,
       facilityId,
       facilitiesCount: facilities.length,
     });
     
-    // Dispatch custom event so App.tsx knows auth state changed
-    dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
-      facilityId,
-      email,
-      facilityName,
-      token: dataItem.token,
-    });
+    // Flutter-like flow: Load complete user data and facilities
+    loadUserDataAndFacilities(email);
+  }
+
+  async function loadUserDataAndFacilities(email: string) {
+    console.log("[Login] Starting Flutter-like user data loading...");
     
-    onLogin();
-    
-    // Show welcome message with facility name
-    toast({
-      title: `Welcome, ${facilityName}!`,
-      description: "You have successfully logged in.",
-    });
+    try {
+      // Step 1: Load complete user information (similar to Flutter loadUser)
+      const { loadUser, getFacilities } = useAuth();
+      const loadUserSuccess = await loadUser(email);
+      
+      if (loadUserSuccess) {
+        console.log("[Login] User data loaded successfully");
+        
+        // Step 2: Get facilities (similar to Flutter getFacilities)
+        const facilities = await getFacilities();
+        console.log("[Login] Facilities loaded:", facilities.length, "facilities");
+        
+        // Dispatch login event with complete information
+        dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
+          email: email,
+          facilitiesLoaded: true,
+          facilitiesCount: facilities.length,
+        });
+        
+        // Call onLogin callback
+        onLogin();
+        
+        // Show welcome message
+        const { getEntityName } = useAuth();
+        const entityName = getEntityName() || email.split('@')[0] || "User";
+        toast({
+          title: `Welcome, ${entityName}!`,
+          description: "You have successfully logged in.",
+        });
+        
+      } else {
+        console.warn("[Login] Failed to load user data, proceeding with basic auth");
+        // Still dispatch login event even if user data loading failed
+        dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
+          email: email,
+          facilitiesLoaded: false,
+        });
+        
+        // Call onLogin callback even on partial failure
+        onLogin();
+        
+        toast({
+          title: "Login successful",
+          description: "You have successfully logged in (limited data available).",
+        });
+      }
+      
+    } catch (error) {
+      console.error("[Login] Error in user data loading:", error);
+      // Dispatch login event even on error
+      dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
+        email: email,
+        facilitiesLoaded: false,
+        error: error.message,
+      });
+      
+      // Call onLogin callback even on error
+      onLogin();
+      
+      toast({
+        title: "Login successful",
+        description: "You have successfully logged in (with some data loading issues).",
+      });
+    }
   }
 
   return (

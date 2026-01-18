@@ -19,7 +19,8 @@ export default function FacilitySelectorPage() {
     getAuthInfo,
     getAvailableFacilities,
     setSelectedFacility,
-    getSelectedFacility
+    getSelectedFacility,
+    getEntityId
   } = useAuth();
 
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -36,7 +37,7 @@ export default function FacilitySelectorPage() {
         if (!authInfo.facilities || authInfo.facilities.length === 0) {
           const availableFacilities = getAvailableFacilities();
           if (availableFacilities.length === 0) {
-            setError("No facilities available. Please contact your administrator.");
+            setError("No facilities assigned to your account. This portal is for facility administrators only. If you are a healthcare provider, please use the mobile application.");
             setIsLoading(false);
             return;
           }

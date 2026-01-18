@@ -89,7 +89,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
 }
 
 function App() {
-  const { isAuthenticated, getAuthInfo, logout } = useAuth();
+  const { isAuthenticated, getAuthInfo, loadUser, getFacilities, getEntityId } = useAuth();
   const [isAuth, setIsAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
   
@@ -97,24 +97,63 @@ function App() {
 
   // Initialize auth state on mount
   useEffect(() => {
-    const updateAuthState = () => {
+    const updateAuthState = async () => {
       const authenticated = isAuthenticated();
       console.log("[App] updateAuthState called - isAuthenticated:", authenticated);
       
       if (authenticated) {
+        console.log("[App] User is authenticated, loading fresh user data...");
+        
+        // Get basic auth info from localStorage first
         const authInfo = getAuthInfo();
-        console.log("[App] Setting auth - authInfo:", authInfo);
-        console.log("[App] About to call setIsAuth(true)");
-        setIsAuth(true);
-        console.log("[App] setIsAuth(true) called");
-        setUser({
-          name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
-          role: authInfo.entity || "Facility Admin",
-          email: authInfo.email,
-          entityId: authInfo.entityId,
-        });
-        console.log("[App] setUser() called");
-        console.log("[App] Auth state updated:", { authInfo });
+        const email = authInfo.email;
+        
+        if (email) {
+          console.log("[App] Loading user data for:", email);
+          
+          // Load fresh user data from API (similar to Flutter's loadUser)
+          const loadUserSuccess = await loadUser(email);
+          
+          if (loadUserSuccess) {
+            console.log("[App] User data loaded successfully, loading facilities...");
+            
+            // Load facilities based on user role
+            const facilities = await getFacilities();
+            console.log("[App] Facilities loaded:", facilities.length, "facilities");
+            
+            // Get updated auth info after loading
+            const updatedAuthInfo = getAuthInfo();
+            console.log("[App] Updated auth info:", updatedAuthInfo);
+            
+            setIsAuth(true);
+            setUser({
+              name: updatedAuthInfo.entityName || updatedAuthInfo.email?.split('@')[0] || "Facility",
+              role: updatedAuthInfo.entity || "Facility Admin",
+              email: updatedAuthInfo.email,
+              entityId: updatedAuthInfo.entityId,
+            });
+            console.log("[App] Auth state updated with fresh data");
+          } else {
+            console.log("[App] Failed to load user data, using cached info");
+            // Fallback to cached info if API call fails
+            setIsAuth(true);
+            setUser({
+              name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
+              role: authInfo.entity || "Facility Admin",
+              email: authInfo.email,
+              entityId: authInfo.entityId,
+            });
+          }
+        } else {
+          console.log("[App] No email found, using cached auth info");
+          setIsAuth(true);
+          setUser({
+            name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
+            role: authInfo.entity || "Facility Admin",
+            email: authInfo.email,
+            entityId: authInfo.entityId,
+          });
+        }
       } else {
         console.log("[App] isAuthenticated is false - checking localStorage...");
         const token = localStorage.getItem("authToken");
