@@ -146,12 +146,17 @@ export function useAuth() {
   async function logout(): Promise<void> {
     if (typeof window === "undefined") return;
     
+    console.log("[Auth] logout() called");
+    
     try {
       const token = getToken();
       const email = getEmail();
       const facilityId = getFacilityId();
       
+      console.log("[Auth] Logout params - email:", email, "facilityId:", facilityId, "hasToken:", !!token);
+      
       if (token && email) {
+        console.log("[Auth] Sending logout request to server...");
         const response = await fetch(LOCAL_API.LOGOUT, {
           method: "POST",
           headers: {
@@ -164,12 +169,17 @@ export function useAuth() {
           }),
         });
         
-        await response.json();
+        const logoutResponse = await response.json();
+        console.log("[Auth] Logout response from server:", logoutResponse);
+      } else {
+        console.log("[Auth] No token or email, skipping server logout request");
       }
     } catch (error) {
       console.error("[Auth] Logout error:", error);
     } finally {
+      console.log("[Auth] Calling clearAuth()...");
       clearAuth();
+      console.log("[Auth] clearAuth() completed, localStorage cleaned");
     }
   }
 
@@ -188,6 +198,8 @@ export function useAuth() {
   function clearAuth(): void {
     if (typeof window === "undefined") return;
     
+    console.log("[Auth] clearAuth() - Removing all auth-related localStorage items");
+    
     localStorage.removeItem("authToken");
     localStorage.removeItem("userEmail");
     localStorage.removeItem("userEntity");
@@ -200,8 +212,10 @@ export function useAuth() {
     localStorage.removeItem("availableFacilities");
     localStorage.removeItem("userGroups");
     
+    console.log("[Auth] clearAuth() - Dispatching LOGOUT event");
     // Dispatch logout event
     dispatchAuthEvent(AUTH_EVENTS.LOGOUT);
+    console.log("[Auth] clearAuth() - Completed");
   }
 
   function getAuthInfo(): {
@@ -214,6 +228,7 @@ export function useAuth() {
     facilityId: string | null;
     selectedFacilityId: string | null;
     facilities: Facility[];
+    userName: string | null;
   } {
     const selectedFacility = getSelectedFacility();
     return {
@@ -227,6 +242,7 @@ export function useAuth() {
       facilityId: selectedFacility || getFacilityId(getEntityId()),
       selectedFacilityId: selectedFacility,
       facilities: getAvailableFacilities(),
+      userName: getUserName(),
     };
   }
 

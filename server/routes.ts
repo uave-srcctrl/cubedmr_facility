@@ -8,22 +8,84 @@ import rateLimit from "express-rate-limit";
 
 const LOG_FILE = "/tmp/wounddatacenter-login.log";
 
-// Rate limiter for login attempts
-const loginLimiter = rateLimit({
+// ============= CUSTOM RATE LIMITING FOR LOGIN =============
+// Store failed login attempts by email (not IP, to allow different users from same IP)
+interface FailedLoginAttempt {
+  count: number;
+  firstAttemptTime: number;
+}
+
+const failedLoginAttempts = new Map<string, FailedLoginAttempt>();
+const MAX_FAILED_ATTEMPTS = 20;
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+
+// Helper function to increment failed login counter
+function recordFailedLogin(email: string): boolean {
+  const now = Date.now();
+  const key = email.toLowerCase();
+  
+  const attempt = failedLoginAttempts.get(key);
+  
+  // If no previous attempts or window has expired, reset
+  if (!attempt || now - attempt.firstAttemptTime > RATE_LIMIT_WINDOW) {
+    failedLoginAttempts.set(key, {
+      count: 1,
+      firstAttemptTime: now,
+    });
+    return true; // Allow
+  }
+  
+  // Increment count
+  attempt.count++;
+  
+  // Check if exceeded limit
+  if (attempt.count > MAX_FAILED_ATTEMPTS) {
+    return false; // Rate limited
+  }
+  
+  return true; // Allow
+}
+
+// Helper function to clear failed login counter (on successful login)
+function clearFailedLogins(email: string): void {
+  failedLoginAttempts.delete(email.toLowerCase());
+}
+
+// Helper function to get remaining attempts
+function getRemainingAttempts(email: string): number {
+  const key = email.toLowerCase();
+  const attempt = failedLoginAttempts.get(key);
+  
+  if (!attempt) {
+    return MAX_FAILED_ATTEMPTS;
+  }
+  
+  const now = Date.now();
+  // If window has expired, reset
+  if (now - attempt.firstAttemptTime > RATE_LIMIT_WINDOW) {
+    failedLoginAttempts.delete(key);
+    return MAX_FAILED_ATTEMPTS;
+  }
+  
+  return Math.max(0, MAX_FAILED_ATTEMPTS - attempt.count);
+}
+
+// Generic rate limiter for other operations (not login)
+const genericLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 attempts per IP (lenient for development)
-  message: "Too many login attempts, please try again later",
+  max: 100, // Higher limit for non-login operations
+  message: "Too many requests, please try again later",
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
       status: false,
-      error: "Too many login attempts. Please try again later.",
+      error: "Too many requests. Please try again later.",
     });
   },
   skip: (req) => {
-    // Skip rate limiting for GET requests
-    return req.method === "GET";
+    // Skip rate limiting for GET requests and TryLogin (handled separately)
+    return req.method === "GET" || req.body?.entity === "TryLogin" || req.body?.action === "TryLogin";
   },
 });
 
@@ -78,12 +140,38 @@ export async function registerRoutes(
 
   // ============= AUTHENTICATION ROUTES =============
   
-  app.post("/api/get", loginLimiter, async (req, res) => {
+  app.post("/api/get", genericLimiter, async (req, res) => {
     const { entity, action, email, password, deviceId, name, ...rest } = req.body;
     
     try {
       // Support both 'entity' and 'action' parameters for backward compatibility
       const requestedEntity = entity || action;
+      
+      // ============= CUSTOM RATE LIMIT FOR TryLogin =============
+      if (requestedEntity === "TryLogin") {
+        if (!email) {
+          return res.status(400).json({ 
+            status: false, 
+            error: "Missing email for login" 
+          });
+        }
+        
+        // Check if this email has exceeded login attempts
+        const remaining = getRemainingAttempts(email);
+        if (remaining <= 0) {
+          console.log("[/api/get] Rate limit exceeded for email:", email);
+          logLogin(`[/api/get] Rate limit exceeded for email: ${email}`);
+          return res.status(429).json({
+            status: false,
+            error: "Too many login attempts. Please try again later.",
+            data: [{
+              status: 0,
+              reason: 5,
+              msg: "Too many login attempts in the last 15 minutes. Please try again later."
+            }]
+          });
+        }
+      }
       
       // Validate required parameters based on entity type
       if (!requestedEntity || !email) {
@@ -221,6 +309,35 @@ export async function registerRoutes(
       
       console.log("[/api/get] About to return data to client");
       logLogin(`[/api/get] Backend response: ${JSON.stringify(data)}`);
+      
+      // ============= HANDLE TryLogin RESPONSE =============
+      if (requestedEntity === "TryLogin") {
+        const dataItem = data.data && data.data[0];
+        
+        // Check if login was successful (status === 1)
+        if (dataItem?.status === 1) {
+          // Clear failed login attempts on successful login
+          clearFailedLogins(email);
+          console.log("[/api/get] Login successful for email:", email, "- Cleared failed attempts");
+          logLogin(`[/api/get] Login successful for email: ${email} - Cleared failed attempts`);
+        } else {
+          // Record failed login attempt
+          const allowed = recordFailedLogin(email);
+          const remaining = getRemainingAttempts(email);
+          console.log("[/api/get] Login failed for email:", email, "- Remaining attempts:", remaining);
+          logLogin(`[/api/get] Login failed for email: ${email} - Remaining attempts: ${remaining}`);
+          
+          // If rate limited, add that information to response
+          if (!allowed) {
+            data.data = data.data || [];
+            data.data[0] = {
+              ...dataItem,
+              reason: 5,
+              msg: "Too many login attempts. Please try again in 15 minutes."
+            };
+          }
+        }
+      }
       
       res.json(data);
     } catch (error) {

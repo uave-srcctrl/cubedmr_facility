@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/form";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, Lock } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { LOCAL_API } from "@/lib/api-config";
@@ -41,6 +41,7 @@ interface LoginProps {
 export default function Login({ onLogin }: LoginProps) {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -49,6 +50,20 @@ export default function Login({ onLogin }: LoginProps) {
       password: "",
     },
   });
+
+  // Check if user is already authenticated on component mount
+  useEffect(() => {
+    const checkAuth = () => {
+      if (isAuthenticated()) {
+        console.log("[Login] User already authenticated - skipping login form and calling onLogin()");
+        onLogin();
+      }
+    };
+
+    // Small delay to ensure localStorage is populated
+    const timer = setTimeout(checkAuth, 100);
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, onLogin]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true);
@@ -302,7 +317,7 @@ export default function Login({ onLogin }: LoginProps) {
       const entityName = authInfo.entityName || email.split('@')[0] || "User";
       toast({
         title: `Welcome, ${entityName}!`,
-        description: `You have successfully logged in. (${facilities.length} facilities available)`,
+        description: `You have successfully logged in.`,
       });
       
     } catch (error) {

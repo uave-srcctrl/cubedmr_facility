@@ -127,7 +127,7 @@ function App() {
             
             setIsAuth(true);
             setUser({
-              name: updatedAuthInfo.entityName || updatedAuthInfo.email?.split('@')[0] || "Facility",
+              name: updatedAuthInfo.userName || updatedAuthInfo.entityName || updatedAuthInfo.email?.split('@')[0] || "Facility",
               role: updatedAuthInfo.entity || "Facility Admin",
               email: updatedAuthInfo.email,
               entityId: updatedAuthInfo.entityId,
@@ -205,7 +205,7 @@ function App() {
     try {
       console.log("[App] Calling logout()...");
       await logout();
-      console.log("[App] logout() completed");
+      console.log("[App] logout() completed successfully");
     } catch (error) {
       console.error("[App] Logout error:", error);
     }
@@ -214,6 +214,7 @@ function App() {
     // Clear local state - App will detect the change via logout event
     setIsAuth(false);
     setUser(null);
+    console.log("[App] handleLogout() - state cleared, should show login page now");
   };
 
   return (
@@ -228,7 +229,7 @@ function App() {
             </>
           ) : (
             <>
-              {console.log('[App] Rendering Login with isAuth=false')}
+              {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
               <Login onLogin={() => {
                 console.log("[App] Login successful, waiting for auth state update...");
               }} />
