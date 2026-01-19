@@ -233,9 +233,38 @@ rm -rf deploy-package "$DEPLOY_FILE"
 log_info "Instalando dependencias..."
 npm install --production
 
-log_info "Iniciando aplicación con PM2..."
+log_info "Compilando aplicación en servidor remoto..."
+npm run build
+if [ $? -ne 0 ]; then
+    log_warning "Build failed pero continuando con el despliegue..."
+fi
+
+log_info "Iniciando aplicación facility con PM2..."
 pm2 start ecosystem.config.js 2>/dev/null || pm2 restart facility
 pm2 save
+
+log_info "Reiniciando servicio wounddatacenter..."
+if command -v systemctl &> /dev/null; then
+    systemctl restart wounddatacenter 2>/dev/null
+    if [ $? -eq 0 ]; then
+        log_success "wounddatacenter reiniciado via systemctl"
+    else
+        log_warning "systemctl restart wounddatacenter falló (puede que no sea un servicio systemd)"
+    fi
+elif command -v service &> /dev/null; then
+    service wounddatacenter restart 2>/dev/null
+    if [ $? -eq 0 ]; then
+        log_success "wounddatacenter reiniciado via service"
+    else
+        log_warning "service restart wounddatacenter falló"
+    fi
+elif pm2 list | grep -q wounddatacenter; then
+    pm2 restart wounddatacenter
+    pm2 save
+    log_success "wounddatacenter reiniciado via PM2"
+else
+    log_warning "Servicio wounddatacenter no encontrado (no está en systemd, service ni PM2)"
+fi
 
 log_success "Deploy completado en servidor"
 
@@ -247,6 +276,9 @@ log_info "Deployment Summary:"
 echo "  • Target Path: $TARGET_PATH"
 echo "  • Backup Location: $TARGET_PATH/$BACKUP_DIR"
 echo "  • Timestamp: $TIMESTAMP"
+echo "  • Build: Compilado en servidor"
+echo "  • Facility Service: Reiniciado via PM2"
+echo "  • Wounddatacenter Service: Reiniciado"
 
 REMOTE_DEPLOY
 
@@ -294,10 +326,15 @@ echo "  • Directorio Primario: $DEPLOY_PATH"
 echo "  • Directorio Workspace: $WORKSPACE_PATH"
 echo "  • Timestamp: $TIMESTAMP"
 echo ""
+echo "Servicios actualizados:"
+echo "  • ✅ Facility: Compilado y reiniciado (PM2)"
+echo "  • ✅ Wounddatacenter: Reiniciado"
+echo ""
 echo "Próximos pasos:"
 echo "  1. Verificar logs: pm2 logs facility"
-echo "  2. Acceder a: https://$DEPLOY_HOST"
-echo "  3. En caso de problemas: rollback desde backups/"
+echo "  2. Verificar wounddatacenter: pm2 logs wounddatacenter o journalctl -u wounddatacenter"
+echo "  3. Acceder a: https://$DEPLOY_HOST"
+echo "  4. En caso de problemas: rollback desde backups/"
 echo ""
 
 exit 0

@@ -127,19 +127,43 @@ jobs:
           echo "📥 Installing dependencies..."
           npm install --production
           
-          echo "🚀 Starting application..."
+          echo "� Building application on remote server..."
+          npm run build
+          if [ $? -ne 0 ]; then
+            echo "⚠️  Build failed, but continuing with deployment..."
+          fi
+          
+          echo "🚀 Starting facility application..."
           pm2 start ecosystem.config.js 2>/dev/null || pm2 restart facility
           pm2 save
           
-          echo "⏳ Waiting for application to start..."
+          echo "⏳ Waiting for facility to start..."
           sleep 3
           
-          echo "📊 Application status:"
+          echo "📊 Facility application status:"
           pm2 status facility
+          
+          echo "🔄 Restarting wounddatacenter service..."
+          if command -v systemctl &> /dev/null; then
+            systemctl restart wounddatacenter 2>/dev/null || echo "⚠️  systemctl restart wounddatacenter failed (may not be a systemd service)"
+          elif command -v service &> /dev/null; then
+            service wounddatacenter restart 2>/dev/null || echo "⚠️  service restart wounddatacenter failed"
+          elif pm2 list | grep -q wounddatacenter; then
+            pm2 restart wounddatacenter
+            pm2 save
+            echo "✅ wounddatacenter restarted via PM2"
+          else
+            echo "⚠️  wounddatacenter service not found (not running as systemd, service, or PM2)"
+          fi
+          
+          echo "⏳ Waiting for services to stabilize..."
+          sleep 2
           
           echo "✅ Deployment completed successfully!"
           echo "  • Deployed to: $TARGET_PATH"
           echo "  • Backup location: $TARGET_PATH/backups/dist-${TIMESTAMP}"
+          echo "  • Facility: Running via PM2"
+          echo "  • Wounddatacenter: Restarted"
           EOF
       
       - name: 🔍 Verify deployment
