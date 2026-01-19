@@ -14,6 +14,7 @@ import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
 import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
+import { useLogoutOnUnload } from "@/hooks/use-logout-on-unload";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 // Simple error boundary for debugging
@@ -92,6 +93,9 @@ function App() {
   const { isAuthenticated, getAuthInfo, loadUser, getFacilities, getEntityId, logout } = useAuth();
   const [isAuth, setIsAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
+  
+  // Enable logout when tab/browser is closed
+  useLogoutOnUnload();
   
   console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name);
 
