@@ -121,30 +121,42 @@ function App() {
         if (email) {
           console.log("[App] Loading user data for:", email);
           
-          // Load fresh user data from API (similar to Flutter's loadUser)
+          // Try to load fresh user data from API (similar to Flutter's loadUser)
           const loadUserSuccess = await loadUser(email);
           
           if (loadUserSuccess) {
-            console.log("[App] User data loaded successfully, loading facilities...");
-            
-            // Load facilities based on user role
+            console.log("[App] User data loaded successfully");
+          } else {
+            console.log("[App] Failed to load fresh user data, but continuing with cached data");
+            // Don't clear auth - use cached data instead
+            // This allows the app to work even if the API is temporarily unavailable
+          }
+          
+          // Try to load facilities (with or without fresh data)
+          try {
             const facilities = await getFacilities();
             console.log("[App] Facilities loaded:", facilities.length, "facilities");
-            
-            // Get updated auth info after loading
-            const updatedAuthInfo = getAuthInfo();
-            console.log("[App] Updated auth info:", updatedAuthInfo);
-            
+          } catch (error) {
+            console.log("[App] Failed to load facilities, continuing with cached:", error);
+            // Continue anyway - use cached facilities if available
+          }
+          
+          // Get current auth info (fresh or cached)
+          const currentAuthInfo = getAuthInfo();
+          console.log("[App] Current auth info:", currentAuthInfo);
+          
+          // Set auth state with current data (fresh or cached)
+          if (currentAuthInfo.token && currentAuthInfo.email) {
             setIsAuth(true);
             setUser({
-              name: updatedAuthInfo.userName || updatedAuthInfo.entityName || updatedAuthInfo.email?.split('@')[0] || "Facility",
-              role: updatedAuthInfo.entity || "Facility Admin",
-              email: updatedAuthInfo.email,
-              entityId: updatedAuthInfo.entityId,
+              name: currentAuthInfo.userName || currentAuthInfo.entityName || currentAuthInfo.email?.split('@')[0] || "Facility",
+              role: currentAuthInfo.entity || "Facility Admin",
+              email: currentAuthInfo.email,
+              entityId: currentAuthInfo.entityId,
             });
-            console.log("[App] Auth state updated with fresh data");
+            console.log("[App] Auth state set with user:", currentAuthInfo.email);
           } else {
-            console.log("[App] Failed to load user data, clearing auth");
+            console.log("[App] No token or email in auth info, clearing auth");
             setIsAuth(false);
             setUser(null);
           }
