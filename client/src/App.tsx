@@ -15,6 +15,8 @@ import AcuityReport from "@/pages/acuity-report";
 import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useLogoutOnUnload } from "@/hooks/use-logout-on-unload";
+import { useLogoutOnBrowserClose } from "@/hooks/use-logout-on-browser-close";
+import { useSingleTabEnforcement } from "@/hooks/use-single-tab-enforcement";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 // Simple error boundary for debugging
@@ -95,7 +97,13 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   
-  console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized);
+  // Clear auth data when new browser session starts (last tab was closed)
+  useLogoutOnBrowserClose();
+  
+  // Enforce only one tab of the application per browser
+  const { isActiveTab, showBlockedMessage } = useSingleTabEnforcement();
+  
+  console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized, 'isActiveTab:', isActiveTab);
 
   // Initialize auth state on mount
   useEffect(() => {
@@ -219,17 +227,71 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <ErrorBoundary>
-          {isAuth && user ? (
+          {!isActiveTab && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              color: 'white',
+              fontFamily: 'Arial, sans-serif',
+            }}>
+              <div style={{
+                textAlign: 'center',
+                padding: '40px',
+                backgroundColor: '#222',
+                borderRadius: '8px',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                maxWidth: '400px',
+              }}>
+                <h1 style={{ marginTop: 0, marginBottom: '20px', fontSize: '24px' }}>
+                  ⚠️ Another Tab Is Open
+                </h1>
+                <p style={{ marginBottom: '20px', fontSize: '16px', lineHeight: '1.5' }}>
+                  The application is already open in another tab of this browser.
+                </p>
+                <p style={{ marginBottom: '30px', fontSize: '14px', color: '#aaa' }}>
+                  Close the other tab and refresh this page to continue.
+                </p>
+                <button
+                  onClick={() => window.close()}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '14px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Close This Tab
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {isActiveTab && (
             <>
-              {console.log('[App] Rendering Router with isAuth=true, user=', user.name)}
-              <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
-            </>
-          ) : (
-            <>
-              {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
-              <Login onLogin={() => {
-                console.log("[App] Login successful, waiting for auth state update...");
-              }} />
+              {isAuth && user ? (
+                <>
+                  {console.log('[App] Rendering Router with isAuth=true, user=', user.name)}
+                  <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
+                </>
+              ) : (
+                <>
+                  {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
+                  <Login onLogin={() => {
+                    console.log("[App] Login successful, waiting for auth state update...");
+                  }} />
+                </>
+              )}
             </>
           )}
         </ErrorBoundary>
