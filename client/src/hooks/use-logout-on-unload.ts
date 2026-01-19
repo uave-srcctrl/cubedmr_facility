@@ -8,63 +8,71 @@ import { useAuth } from './use-auth';
  * - Closing the browser window
  * - Navigating away from the site
  * - Pressing the back button to leave the site
+ * 
+ * Ensures that when reopening the browser, user is NOT authenticated
  */
 export function useLogoutOnUnload() {
-  const { logout, isAuthenticated } = useAuth();
+  const { logout, isAuthenticated, clearAuth } = useAuth();
 
   useEffect(() => {
     if (!isAuthenticated()) {
       return; // Don't set up listeners if not authenticated
     }
 
-    const handleBeforeUnload = async (event: BeforeUnloadEvent) => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       console.log('[useLogoutOnUnload] beforeunload event fired - user closing tab/window');
       
-      // Call logout but don't wait for it to complete
-      // (beforeunload doesn't allow async operations)
-      logout().catch(error => {
-        console.error('[useLogoutOnUnload] Error during beforeunload logout:', error);
-      });
-      
-      // Some browsers require returning a string to show the confirmation dialog
-      // We don't show a dialog, just silently logout
-    };
-
-    const handleUnload = async () => {
-      console.log('[useLogoutOnUnload] unload event fired - page is being unloaded');
-      
-      // Try to logout with a synchronous fetch (beacon)
       try {
         const token = localStorage.getItem("authToken");
         const email = localStorage.getItem("userEmail");
         
         if (token && email) {
-          // Use sendBeacon for reliable delivery even if page is unloading
+          // Try to send logout request using sendBeacon (most reliable during unload)
           const logoutUrl = localStorage.getItem("logoutUrl") || "/api/auth/logout";
           const payload = JSON.stringify({
             email,
             facility_id: localStorage.getItem("userFacilityId") || null,
           });
           
-          navigator.sendBeacon(logoutUrl, payload);
-          console.log('[useLogoutOnUnload] Sent beacon logout request');
+          // Set content type header for JSON
+          const blob = new Blob([payload], { type: 'application/json' });
+          navigator.sendBeacon(logoutUrl, blob);
+          console.log('[useLogoutOnUnload] Sent beacon logout request to server');
         }
       } catch (error) {
-        console.error('[useLogoutOnUnload] Error during unload:', error);
+        console.error('[useLogoutOnUnload] Error sending beacon during beforeunload:', error);
+      }
+      
+      // CRITICAL: Clear localStorage immediately to ensure user is not authenticated on browser reopen
+      console.log('[useLogoutOnUnload] Clearing localStorage to ensure logout on browser reopen');
+      try {
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("userEmail");
+        localStorage.removeItem("userEntity");
+        localStorage.removeItem("userEntityName");
+        localStorage.removeItem("userEntityId");
+        localStorage.removeItem("userCurrentTenant");
+        localStorage.removeItem("userFacilityId");
+        localStorage.removeItem("userFacilities");
+        localStorage.removeItem("selectedFacilityId");
+        localStorage.removeItem("availableFacilities");
+        localStorage.removeItem("userGroups");
+        localStorage.removeItem("userName");
+        console.log('[useLogoutOnUnload] localStorage cleared');
+      } catch (error) {
+        console.error('[useLogoutOnUnload] Error clearing localStorage:', error);
       }
     };
 
-    // Add event listeners
+    // Add event listener
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('unload', handleUnload);
 
     console.log('[useLogoutOnUnload] Listeners attached - logout on tab/window close enabled');
 
     // Cleanup: remove listeners when component unmounts
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('unload', handleUnload);
       console.log('[useLogoutOnUnload] Listeners removed');
     };
-  }, [logout, isAuthenticated]);
+  }, [logout, isAuthenticated, clearAuth]);
 }

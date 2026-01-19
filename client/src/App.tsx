@@ -93,11 +93,9 @@ function App() {
   const { isAuthenticated, getAuthInfo, loadUser, getFacilities, getEntityId, logout } = useAuth();
   const [isAuth, setIsAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   
-  // Enable logout when tab/browser is closed
-  useLogoutOnUnload();
-  
-  console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name);
+  console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized);
 
   // Initialize auth state on mount
   useEffect(() => {
@@ -138,35 +136,27 @@ function App() {
             });
             console.log("[App] Auth state updated with fresh data");
           } else {
-            console.log("[App] Failed to load user data, using cached info");
-            // Fallback to cached info if API call fails
-            setIsAuth(true);
-            setUser({
-              name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
-              role: authInfo.entity || "Facility Admin",
-              email: authInfo.email,
-              entityId: authInfo.entityId,
-            });
+            console.log("[App] Failed to load user data, clearing auth");
+            setIsAuth(false);
+            setUser(null);
           }
         } else {
-          console.log("[App] No email found, using cached auth info");
-          setIsAuth(true);
-          setUser({
-            name: authInfo.entityName || authInfo.email?.split('@')[0] || "Facility",
-            role: authInfo.entity || "Facility Admin",
-            email: authInfo.email,
-            entityId: authInfo.entityId,
-          });
+          console.log("[App] No email found in localStorage, user not authenticated");
+          setIsAuth(false);
+          setUser(null);
         }
       } else {
         console.log("[App] isAuthenticated is false - checking localStorage...");
         const token = localStorage.getItem("authToken");
-        const facilityId = localStorage.getItem("userFacilityId");
-        console.log("[App] localStorage - token:", token ? "present" : "missing", "facilityId:", facilityId);
+        const email = localStorage.getItem("userEmail");
+        console.log("[App] localStorage - token:", token ? "present" : "missing", "email:", email ? "present" : "missing");
         setIsAuth(false);
         setUser(null);
         console.log("[App] Auth cleared");
       }
+      
+      // Mark app as initialized
+      setIsInitialized(true);
     };
 
     // Check auth state on mount
@@ -203,6 +193,9 @@ function App() {
       window.removeEventListener("storage", handleStorageChange);
     };
   }, []);
+
+  // Enable logout when tab/browser is closed (after initialization)
+  useLogoutOnUnload();
 
   const handleLogout = async () => {
     console.log("[App] handleLogout() called - current isAuth:", isAuth);
