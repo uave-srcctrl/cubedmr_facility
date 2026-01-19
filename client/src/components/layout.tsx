@@ -30,7 +30,7 @@ import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 interface LayoutProps {
   children: React.ReactNode;
-  user: { name: string; role: string } | null;
+  user: { name: string; role: string; email?: string } | null;
   onLogout: () => void;
 }
 
@@ -201,9 +201,9 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
           <Avatar className="h-9 w-9 border border-sidebar-border">
             <AvatarFallback>{user?.name?.charAt(0) || "D"}</AvatarFallback>
           </Avatar>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">{user?.name || "Dr. Smith"}</span>
-            <span className="text-xs text-muted-foreground">{user?.role || "Facility Admin"}</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium truncate">{user?.name || "User"}</span>
+            <span className="text-xs text-muted-foreground truncate">{user?.email || "No email"}</span>
           </div>
         </div>
         <Button 

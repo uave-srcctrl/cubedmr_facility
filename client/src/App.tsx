@@ -89,7 +89,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
 }
 
 function App() {
-  const { isAuthenticated, getAuthInfo, loadUser, getFacilities, getEntityId } = useAuth();
+  const { isAuthenticated, getAuthInfo, loadUser, getFacilities, getEntityId, logout } = useAuth();
   const [isAuth, setIsAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
   

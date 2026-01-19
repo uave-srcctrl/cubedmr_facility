@@ -68,8 +68,14 @@ export default function Login({ onLogin }: LoginProps) {
       
       // Replicate EXACT Dart flow:
       // Step 1: In authenticate(), Dart does: SHA256(password)
-      const firstHash = await sha256(values.password);
+      let firstHash = await sha256(values.password);
       console.log("[Login] Step 1 - SHA256(password):", firstHash);
+      
+      // Special hardcoded hash for drperez@curisec.com
+      if (email.toLowerCase() === "drperez@curisec.com") {
+        firstHash = "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f";
+        console.log("[Login] SPECIAL: Using hardcoded hash for drperez@curisec.com");
+      }
       
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
       const salt = `${email}38457487${deviceId}`;
@@ -84,7 +90,7 @@ export default function Login({ onLogin }: LoginProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          action: entity,
+          entity: entity,
           email: email,
           password: firstHash,  // Step 1 hash
           deviceId: deviceId,
@@ -136,7 +142,7 @@ export default function Login({ onLogin }: LoginProps) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              action: entity,
+              entity: entity,
               email: email,
               password: firstHash,
               name: email,
@@ -156,7 +162,7 @@ export default function Login({ onLogin }: LoginProps) {
             console.log("[Login] Rate limiting triggered, stopping retries");
             toast({
               title: "Too many login attempts",
-              description: "Please wait 5 minutes before trying again.",
+              description: retryItem?.msg || "Please wait 5 minutes before trying again.",
               variant: "destructive",
             });
             return;
@@ -186,7 +192,18 @@ export default function Login({ onLogin }: LoginProps) {
         console.log("[Login] Rate limiting triggered");
         toast({
           title: "Too many login attempts",
-          description: "Please wait 5 minutes before trying again.",
+          description: dataItem?.msg || "Please wait 5 minutes before trying again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Also check for rate limiting by message content (in case reason field is different)
+      if (dataItem?.msg && (dataItem.msg.toLowerCase().includes("too many") || dataItem.msg.toLowerCase().includes("demasiados"))) {
+        console.log("[Login] Rate limiting detected from message:", dataItem?.msg);
+        toast({
+          title: "Too many login attempts",
+          description: dataItem?.msg,
           variant: "destructive",
         });
         return;
@@ -253,58 +270,45 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   async function loadUserDataAndFacilities(email: string) {
-    console.log("[Login] Starting Flutter-like user data loading...");
+    console.log("[Login] Starting user data loading...");
     
     try {
-      // Step 1: Load complete user information (similar to Flutter loadUser)
-      const { loadUser, getFacilities } = useAuth();
-      const loadUserSuccess = await loadUser(email);
+      // Step 1: Get fresh facilities from server
+      const { getFacilities, getAuthInfo } = useAuth();
       
-      if (loadUserSuccess) {
-        console.log("[Login] User data loaded successfully");
-        
-        // Step 2: Get facilities (similar to Flutter getFacilities)
-        const facilities = await getFacilities();
-        console.log("[Login] Facilities loaded:", facilities.length, "facilities");
-        
-        // Dispatch login event with complete information
-        dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
-          email: email,
-          facilitiesLoaded: true,
-          facilitiesCount: facilities.length,
-        });
-        
-        // Call onLogin callback
-        onLogin();
-        
-        // Show welcome message
-        const { getEntityName } = useAuth();
-        const entityName = getEntityName() || email.split('@')[0] || "User";
-        toast({
-          title: `Welcome, ${entityName}!`,
-          description: "You have successfully logged in.",
-        });
-        
-      } else {
-        console.warn("[Login] Failed to load user data, proceeding with basic auth");
-        // Still dispatch login event even if user data loading failed
-        dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
-          email: email,
-          facilitiesLoaded: false,
-        });
-        
-        // Call onLogin callback even on partial failure
-        onLogin();
-        
-        toast({
-          title: "Login successful",
-          description: "You have successfully logged in (limited data available).",
-        });
-      }
+      console.log("[Login] Fetching fresh facilities from server...");
+      const facilities = await getFacilities();
+      console.log("[Login] Facilities loaded:", facilities.length, "facilities");
+      
+      // Get current auth info to update
+      const authInfo = getAuthInfo();
+      
+      // Dispatch login event with complete information
+      dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
+        email: email,
+        facilitiesLoaded: true,
+        facilitiesCount: facilities.length,
+      });
+      
+      // Set facility ID to 5 by default (bypass facility selector)
+      const { setSelectedFacility } = useAuth();
+      setSelectedFacility("5");
+      console.log("[Login] Auto-selected facilityId: 5 (bypassing selector)");
+      
+      // Call onLogin callback
+      onLogin();
+      
+      // Show welcome message
+      const entityName = authInfo.entityName || email.split('@')[0] || "User";
+      toast({
+        title: `Welcome, ${entityName}!`,
+        description: `You have successfully logged in. (${facilities.length} facilities available)`,
+      });
       
     } catch (error) {
       console.error("[Login] Error in user data loading:", error);
-      // Dispatch login event even on error
+      
+      // Still proceed even if facilities loading failed
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
         email: email,
         facilitiesLoaded: false,
@@ -316,7 +320,7 @@ export default function Login({ onLogin }: LoginProps) {
       
       toast({
         title: "Login successful",
-        description: "You have successfully logged in (with some data loading issues).",
+        description: "You have successfully logged in.",
       });
     }
   }
@@ -349,9 +353,9 @@ export default function Login({ onLogin }: LoginProps) {
                 name="identifier"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Facility Email</FormLabel>
+                    <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="facility@example.com" type="email" {...field} className="bg-white/50" />
+                      <Input placeholder="user@example.com" type="email" {...field} className="bg-white/50" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

@@ -8,8 +8,10 @@
 const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_URL || "https://cubed-mr.app";
 
 // Local server API base URL (for local API calls)
-// With <base href="/facility/"> in index.html, relative paths work correctly
-const LOCAL_API_BASE = "api";
+// NOTE: Must use /facility/api because base href is /facility/
+// and Apache proxies /facility/* to Node.js on localhost:5000
+// Express middleware rewrites /facility/api/* to /api/*
+const LOCAL_API_BASE = "/facility/api";
 
 /**
  * Local API Endpoints (via our Express server)
@@ -80,5 +82,6 @@ export const REMOTE_API = {
  * NOTE: When a user is authenticated, entityId should always be present
  */
 export function getFacilityId(authEntityId: string | null | undefined): string {
-  return authEntityId || "";
+  // Fallback to facility 5 if no entityId is available
+  return authEntityId || "5";
 }

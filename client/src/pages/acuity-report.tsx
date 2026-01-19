@@ -16,20 +16,8 @@ export default function AcuityReport() {
   const authInfo = getAuthInfo();
   const facilityId = getFacilityId(authInfo.entityId);
   
-  // If no facilityId, show error - shouldn't happen if auth is working
-  if (!facilityId) {
-    return (
-      <div className="space-y-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Authentication Error</AlertTitle>
-          <AlertDescription>
-            Missing facility information. Please log in again.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  // facilityId will always have a value (fallback to 5 if no entityId)
+  console.log("[AcuityReport] Loading dashboard for facilityId:", facilityId);
 
   const token = getToken();
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');

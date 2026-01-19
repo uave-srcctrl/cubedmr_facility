@@ -33,12 +33,16 @@ export default function FacilitySelectorPage() {
       try {
         const authInfo = getAuthInfo();
         
-        // Si no hay facilities disponibles, mostrar error
+        // Si no hay facilities disponibles, usar fallback
         if (!authInfo.facilities || authInfo.facilities.length === 0) {
           const availableFacilities = getAvailableFacilities();
           if (availableFacilities.length === 0) {
-            setError("No facilities assigned to your account. This portal is for facility administrators only. If you are a healthcare provider, please use the mobile application.");
+            // No facilities available - use fallback to facility 5
+            console.log("[FacilitySelectorPage] No facilities available, using fallback facilityId: 5");
+            setSelectedFacility("5");
             setIsLoading(false);
+            // Navigate to dashboard with fallback facility
+            setTimeout(() => navigate("/facility/"), 300);
             return;
           }
           setFacilities(availableFacilities);

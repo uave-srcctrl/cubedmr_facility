@@ -111,48 +111,83 @@ export async function registerRoutes(
         }
       }
       
-      // For other entities, require Authorization header (token)
-      if (requestedEntity !== "TryLogin") {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          console.error("[/api/get] Missing or invalid Authorization header for entity:", requestedEntity);
-          return res.status(401).json({ 
-            status: false, 
-            error: "Authorization required for this operation" 
-          });
-        }
-        // Extract token
-        const token = authHeader.substring(7); // Remove "Bearer "
-        remotePayload.providertrackid = token;
-      }
-
-      // Send payload to backend as-is (no entity transformation)
+      // Build the base remote payload first
       const remotePayload = {
         entity: requestedEntity,
         email,
+        ...(action && { action }),
         ...(password && { password }),
         ...(deviceId && { deviceId }),
         ...(name && { name }),
         ...rest,
       };
 
+      // For other entities, require token (either from Authorization header or request body)
+      if (requestedEntity !== "TryLogin") {
+        let token: string | undefined;
+        
+        // Check for token in Authorization header first
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+          token = authHeader.substring(7); // Remove "Bearer "
+        } else if (remotePayload.token) {
+          // Fall back to token in request body
+          token = remotePayload.token as string;
+        }
+        
+        if (!token) {
+          console.error("[/api/get] Missing token for entity:", requestedEntity);
+          return res.status(401).json({ 
+            status: false, 
+            error: "Authorization required for this operation" 
+          });
+        }
+      }
+
       logLogin(`[/api/get] Client sent entity/action: ${requestedEntity}`);
       logLogin(`[/api/get] Remote payload: ${JSON.stringify(remotePayload)}`);
+      console.log("[/api/get] Full request body received:", JSON.stringify(req.body, null, 2));
+      console.log("[/api/get] Remote payload keys:", Object.keys(remotePayload));
+      console.log("[/api/get] About to send to backend - entity:", requestedEntity, "action in payload:", remotePayload.action, "id:", remotePayload.id);
 
       let body;
       let headers = {};
       
       if (requestedEntity === "TryLogin" || requestedEntity === "EntityInfo" || requestedEntity === "GroupsByUser") {
-        // For login and user data, use JSON
+        // For login and user data operations, use JSON
         body = JSON.stringify(remotePayload);
         headers = { "Content-Type": "application/json" };
-      } else {
-        // For other entities, use FormData
+        console.log("[/api/get] Sending as JSON. Body:", body.substring(0, 200));
+      } else if (requestedEntity === "Facility" || requestedEntity === "FacilitiesByProvider") {
+        // For facility list operations, use FormData/multipart like Flutter does
+        // The remote API expects multipart/form-data, not URL-encoded
+        const FormData = require('form-data');
         const formData = new FormData();
         for (const key in remotePayload) {
-          formData.append(key, remotePayload[key]);
+          // Only append if value is not undefined and not null
+          if (remotePayload[key] !== undefined && remotePayload[key] !== null) {
+            formData.append(key, remotePayload[key]);
+          }
         }
         body = formData;
+        headers = {
+          ...formData.getHeaders(),
+          // Add authorization header with the token
+          ...(remotePayload.token && { "Authorization": `Bearer ${remotePayload.token}` }),
+        };
+        console.log("[/api/get] Sending as FormData (multipart) for Facility list with Authorization header");
+      } else {
+        // For other entities, use FormData
+        const formData = new URLSearchParams();
+        for (const key in remotePayload) {
+          // Only append if value is not undefined and not null
+          if (remotePayload[key] !== undefined && remotePayload[key] !== null) {
+            formData.append(key, remotePayload[key]);
+          }
+        }
+        body = formData.toString();
+        headers = { "Content-Type": "application/x-www-form-urlencoded" };
+        console.log("[/api/get] Sending as FormData:", body);
       }
 
       const remoteResponse = await fetchWithTimeout(
@@ -164,19 +199,27 @@ export async function registerRoutes(
         }
       );
 
+      console.log("[/api/get] Remote response status:", remoteResponse.status, "ok:", remoteResponse.ok);
+
       if (!remoteResponse.ok) {
         logLogin(`[/api/get] Backend returned status: ${remoteResponse.status}`);
       }
 
       let data;
       try {
-        data = await remoteResponse.json();
+        const responseText = await remoteResponse.text();
+        console.log("[/api/get] Backend raw response received - length:", responseText.length);
+        logLogin(`[/api/get] Backend raw response (${responseText.length} bytes): ${responseText.substring(0, 200)}`);
+        
+        data = JSON.parse(responseText);
+        console.log("[/api/get] Parsed backend data:", JSON.stringify(data).substring(0, 300));
       } catch (e) {
-        const text = await remoteResponse.text();
-        logLogin(`[/api/get] Backend returned non-JSON response: ${text.substring(0, 500)}`);
+        console.error("[/api/get] Failed to parse backend response:", e);
+        logLogin(`[/api/get] Failed to parse backend response: ${e}`);
         return res.status(500).json({ status: false, error: "Backend returned invalid response" });
       }
       
+      console.log("[/api/get] About to return data to client");
       logLogin(`[/api/get] Backend response: ${JSON.stringify(data)}`);
       
       res.json(data);
