@@ -87,10 +87,27 @@ jobs:
           set -e
           
           DEPLOY_PATH="/var/www/facility"
+          WORKSPACE_PATH="/workspace/woundcareapp"
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           
-          echo "📋 Deploying to: $DEPLOY_PATH"
-          cd $DEPLOY_PATH || exit 1
+          echo "📋 Deployment Configuration:"
+          echo "  • Primary Deploy Path: $DEPLOY_PATH"
+          echo "  • Workspace Path: $WORKSPACE_PATH"
+          echo "  • Timestamp: $TIMESTAMP"
+          
+          # Determinar la ruta de despliegue a usar
+          if [ -d "$DEPLOY_PATH" ]; then
+            TARGET_PATH="$DEPLOY_PATH"
+            echo "✅ Using primary deploy path: $TARGET_PATH"
+          elif [ -d "$WORKSPACE_PATH" ]; then
+            TARGET_PATH="$WORKSPACE_PATH"
+            echo "⚠️  Primary path not found. Using workspace path: $TARGET_PATH"
+          else
+            echo "❌ Neither $DEPLOY_PATH nor $WORKSPACE_PATH found"
+            exit 1
+          fi
+          
+          cd $TARGET_PATH || exit 1
           
           echo "⏹️  Stopping application..."
           pm2 stop facility 2>/dev/null || true
@@ -121,6 +138,8 @@ jobs:
           pm2 status facility
           
           echo "✅ Deployment completed successfully!"
+          echo "  • Deployed to: $TARGET_PATH"
+          echo "  • Backup location: $TARGET_PATH/backups/dist-${TIMESTAMP}"
           EOF
       
       - name: 🔍 Verify deployment

@@ -17,6 +17,7 @@ NC='\033[0m' # No Color
 DEPLOY_USER="${DEPLOY_USER:-deploy}"
 DEPLOY_HOST="${DEPLOY_HOST:-your-server.com}"
 DEPLOY_PATH="/var/www/facility"
+WORKSPACE_PATH="/workspace/woundcareapp"
 APP_NAME="facility"
 BRANCH="${1:-main}"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -170,7 +171,8 @@ ssh $DEPLOY_USER@$DEPLOY_HOST << 'REMOTE_DEPLOY'
 set -e
 
 DEPLOY_PATH="/var/www/facility"
-DEPLOY_FILE=$(basename "$DEPLOY_FILE")
+WORKSPACE_PATH="/workspace/woundcareapp"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 # Colors (repetir en script remoto)
 RED='\033[0;31m'
@@ -195,7 +197,20 @@ log_warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
-cd $DEPLOY_PATH
+# Determinar la ruta de despliegue a usar
+log_info "Checking deployment paths..."
+if [ -d "$DEPLOY_PATH" ]; then
+    TARGET_PATH="$DEPLOY_PATH"
+    log_success "Using primary deploy path: $TARGET_PATH"
+elif [ -d "$WORKSPACE_PATH" ]; then
+    TARGET_PATH="$WORKSPACE_PATH"
+    log_warning "Primary path not found. Using workspace path: $TARGET_PATH"
+else
+    log_error "Neither $DEPLOY_PATH nor $WORKSPACE_PATH found"
+    exit 1
+fi
+
+cd $TARGET_PATH
 
 log_info "Deteniendo aplicación..."
 pm2 stop facility 2>/dev/null || log_warning "Aplicación no estaba corriendo"
@@ -206,9 +221,14 @@ BACKUP_DIR="backups/dist-$(date +%Y%m%d-%H%M%S)"
 cp -r dist "$BACKUP_DIR" 2>/dev/null || log_warning "No hay versión anterior para backup"
 
 log_info "Extrayendo archivos nuevos..."
-tar -xzf /tmp/$DEPLOY_FILE -C .
+DEPLOY_FILE=$(ls -t /tmp/facility-deploy-*.tar.gz 2>/dev/null | head -1)
+if [ -z "$DEPLOY_FILE" ]; then
+    log_error "No deployment file found in /tmp"
+    exit 1
+fi
+tar -xzf "$DEPLOY_FILE" -C .
 mv deploy-package/* .
-rm -rf deploy-package /tmp/$DEPLOY_FILE
+rm -rf deploy-package "$DEPLOY_FILE"
 
 log_info "Instalando dependencias..."
 npm install --production
@@ -222,6 +242,11 @@ log_success "Deploy completado en servidor"
 log_info "Verificando estado..."
 sleep 2
 pm2 status facility
+
+log_info "Deployment Summary:"
+echo "  • Target Path: $TARGET_PATH"
+echo "  • Backup Location: $TARGET_PATH/$BACKUP_DIR"
+echo "  • Timestamp: $TIMESTAMP"
 
 REMOTE_DEPLOY
 
@@ -265,13 +290,14 @@ echo ""
 echo "Información del Deploy:"
 echo "  • Servidor: $DEPLOY_HOST"
 echo "  • Rama: $BRANCH"
-echo "  • Directorio: $DEPLOY_PATH"
+echo "  • Directorio Primario: $DEPLOY_PATH"
+echo "  • Directorio Workspace: $WORKSPACE_PATH"
 echo "  • Timestamp: $TIMESTAMP"
 echo ""
 echo "Próximos pasos:"
 echo "  1. Verificar logs: pm2 logs facility"
 echo "  2. Acceder a: https://$DEPLOY_HOST"
-echo "  3. En caso de problemas: rollback"
+echo "  3. En caso de problemas: rollback desde backups/"
 echo ""
 
 exit 0
