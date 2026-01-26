@@ -9,10 +9,12 @@ import { useAuth } from './use-auth';
  * - Navigating away from the site
  * - Pressing the back button to leave the site
  * 
- * Ensures that when reopening the browser, user is NOT authenticated
+ * IMPORTANT: Uses sessionStorage-based approach to avoid affecting other open tabs
+ * When ALL tabs are closed, sessionStorage is automatically cleared
+ * Tokens are stored in sessionStorage so they don't persist across browser sessions
  */
 export function useLogoutOnUnload() {
-  const { logout, isAuthenticated, clearAuth } = useAuth();
+  const { logout, isAuthenticated } = useAuth();
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -43,25 +45,12 @@ export function useLogoutOnUnload() {
         console.error('[useLogoutOnUnload] Error sending beacon during beforeunload:', error);
       }
       
-      // CRITICAL: Clear localStorage immediately to ensure user is not authenticated on browser reopen
-      console.log('[useLogoutOnUnload] Clearing localStorage to ensure logout on browser reopen');
-      try {
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("userEmail");
-        localStorage.removeItem("userEntity");
-        localStorage.removeItem("userEntityName");
-        localStorage.removeItem("userEntityId");
-        localStorage.removeItem("userCurrentTenant");
-        localStorage.removeItem("userFacilityId");
-        localStorage.removeItem("userFacilities");
-        localStorage.removeItem("selectedFacilityId");
-        localStorage.removeItem("availableFacilities");
-        localStorage.removeItem("userGroups");
-        localStorage.removeItem("userName");
-        console.log('[useLogoutOnUnload] localStorage cleared');
-      } catch (error) {
-        console.error('[useLogoutOnUnload] Error clearing localStorage:', error);
-      }
+      // IMPORTANT: DO NOT clear localStorage here because:
+      // - localStorage is shared between ALL tabs of the same domain
+      // - Clearing it when closing ONE tab will affect other open tabs
+      // - sessionStorage is automatically cleared when the LAST tab closes
+      // - Instead, we rely on tokens being stored in sessionStorage
+      console.log('[useLogoutOnUnload] Tab/window closed - session will persist in other tabs');
     };
 
     // Add event listener
@@ -74,5 +63,5 @@ export function useLogoutOnUnload() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       console.log('[useLogoutOnUnload] Listeners removed');
     };
-  }, [logout, isAuthenticated, clearAuth]);
+  }, [logout, isAuthenticated]);
 }

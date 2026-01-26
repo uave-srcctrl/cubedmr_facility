@@ -12,7 +12,8 @@ import {
   Stethoscope,
   Building2,
   Check,
-  ChevronDown
+  ChevronDown,
+  Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -86,6 +87,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
     { name: "Outcome Report Global", href: "/facility/outcome-report", icon: Activity },
     { name: "Wound Etiology", href: "/facility/etiology-report", icon: PieChart },
     { name: "Acuity Index", href: "/facility/acuity-report", icon: Stethoscope },
+    { name: "Import Excel", href: "/facility/excel-import", icon: Upload },
   ];
 
   const SidebarContent = () => (

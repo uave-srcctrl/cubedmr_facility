@@ -12,6 +12,7 @@ import FacilityWoundReport from "@/pages/facility-wound-report";
 import OutcomeReportGlobal from "@/pages/outcome-report";
 import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
+import ExcelImportPage from "@/pages/excel-import";
 import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useLogoutOnUnload } from "@/hooks/use-logout-on-unload";
@@ -84,6 +85,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
         <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
         <Route path="/facility/etiology-report" component={EtiologyReport} />
         <Route path="/facility/acuity-report" component={AcuityReport} />
+        <Route path="/facility/excel-import" component={ExcelImportPage} />
         <Route path="/facility-selector" component={FacilitySelectorPage} />
         <Route component={NotFound} />
       </Switch>
