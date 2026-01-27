@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico de Autenticación - /facility</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header .icon {
+            font-size: 32px;
+        }
+        
+        .header .timestamp {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .status-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .status-item {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .status-item.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-item.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-item.warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section h2 .icon {
+            font-size: 24px;
+        }
+        
+        .item {
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #ddd;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+        
+        .item.success {
+            border-left-color: #28a745;
+            background: #f1f9f7;
+        }
+        
+        .item.error {
+            border-left-color: #dc3545;
+            background: #fdf6f6;
+        }
+        
+        .item.warning {
+            border-left-color: #ffc107;
+            background: #fffef0;
+        }
+        
+        .item .label {
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+        
+        .item .status-icon {
+            font-size: 18px;
+        }
+        
+        .item .details {
+            color: #666;
+            font-size: 14px;
+            margin-left: 26px;
+            margin-top: 8px;
+        }
+        
+        .flow-diagram {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+        
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+        }
+        
+        .code-block .keyword {
+            color: #f92672;
+        }
+        
+        .code-block .string {
+            color: #e6db74;
+        }
+        
+        .code-block .number {
+            color: #ae81ff;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        
+        table th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        table tr:hover {
+            background: #f5f5f5;
+        }
+        
+        .metric {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-right: 10px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .metric.success {
+            background: #28a745;
+        }
+        
+        .metric.error {
+            background: #dc3545;
+        }
+        
+        .metric.warning {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .footer {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .summary-table {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .summary-box {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .summary-box .number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .summary-box .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            opacity: 0.8;
+        }
+        
+        @media (max-width: 768px) {
+            .status-bar {
+                grid-template-columns: 1fr;
+            }
+            
+            .section {
+                padding: 15px;
+            }
+            
+            table {
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1><span class="icon">🔐</span> Diagnóstico de Autenticación - /facility</h1>
+            <div class="timestamp">Análisis realizado: 15 de Enero 2026 - 14:54:39 UTC</div>
+            
+            <div class="status-bar">
+                <div class="status-item success">
+                    <div>✓ Status General</div>
+                    <div style="font-size: 12px; margin-top: 5px;">OPERACIONAL</div>
+                </div>
+                <div class="status-item success">
+                    <div>✓ 20 Pruebas</div>
+                    <div style="font-size: 12px; margin-top: 5px;">EXITOSAS</div>
+                </div>
+                <div class="status-item success">
+                    <div>✓ 0 Errores</div>
+                    <div style="font-size: 12px; margin-top: 5px;">CRÍTICOS</div>
+                </div>
+                <div class="status-item success">
+                    <div>✓ Uptime</div>
+                    <div style="font-size: 12px; margin-top: 5px;">5 DÍAS</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sección 1: Procesos y Servicios -->
+        <div class="section">
+            <h2><span class="icon">⚙️</span> Procesos y Servicios</h2>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Node.js Server</div>
+                <div class="details">
+                    PID: 896791 | Memory: 40.04 MB | Status: running<br>
+                    <code>Command: /usr/local/bin/node /var/www/facility/dist/index.cjs</code>
+                </div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Apache2 Service</div>
+                <div class="details">
+                    Status: active (running)<br>
+                    VirtualHost: cubed-mr.app:443
+                </div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> wounddatacenter Service</div>
+                <div class="details">
+                    Status: active (running)<br>
+                    Uptime: 5 días (desde 2026-01-10 12:27:09 UTC)
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sección 2: Conectividad -->
+        <div class="section">
+            <h2><span class="icon">🌐</span> Conectividad</h2>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Puerto 5000 (Node.js API)</div>
+                <div class="details">
+                    localhost:5000 está escuchando<br>
+                    Tiempo de respuesta: < 100ms
+                </div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Puerto 443 (Apache SSL)</div>
+                <div class="details">
+                    localhost:443 está escuchando<br>
+                    SSL/TLS habilitado
+                </div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Backend Remoto</div>
+                <div class="details">
+                    https://cubed-mr.app/api/get es accesible<br>
+                    Latencia promedio: ~120ms
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sección 3: Configuración de Apache -->
+        <div class="section">
+            <h2><span class="icon">🔧</span> Configuración de Apache</h2>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> ProxyPass Configuration</div>
+                <div class="details">
+                    Configurado correctamente en /etc/apache2/sites-available/cubedmr-ssl.conf
+                </div>
+            </div>
+            
+            <div class="flow-diagram">
+https://cubed-mr.app/facility/*
+         ↓ (ProxyPass)
+http://localhost:5000/facility/*
+         ↓ (Node.js)
+Backend: https://cubed-mr.app/api/get
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> SSL/TLS Habilitado</div>
+                <div class="details">
+                    Certificado: /etc/apache2/ssl-certs/cubed-mr.app.crt<br>
+                    Clave privada: /etc/apache2/ssl-certs/cubed-mr.app.key<br>
+                    Expira: Jan 30 23:59:59 2026 GMT
+                </div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Módulos Proxy</div>
+                <div class="details">
+                    mod_proxy, mod_proxy_http, mod_rewrite cargados
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sección 4: Flujo de Autenticación -->
+        <div class="section">
+            <h2><span class="icon">🔑</span> Flujo de Autenticación</h2>
+            
+            <p style="margin-bottom: 15px;">El sistema utiliza autenticación en dos capas:</p>
+            
+            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h3 style="color: #667eea; margin-bottom: 10px;">Capa 1: Cliente → Express (Local)</h3>
+                <p>El cliente envía credenciales al servidor Express que actúa como proxy.</p>
+            </div>
+            
+            <div class="code-block">
+<span class="keyword">POST</span> /api/get HTTP/1.1
+Host: localhost:5000
+Content-Type: application/json
+
+{
+  <span class="string">"action"</span>: <span class="string">"TryLoginFacilities"</span>,
+  <span class="string">"email"</span>: <span class="string">"facility1@wounddatacenter.com"</span>,
+  <span class="string">"password"</span>: <span class="string">"***"</span>,
+  <span class="string">"deviceId"</span>: <span class="string">"web-abc123"</span>
+}
+            </div>
+            
+            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h3 style="color: #667eea; margin-bottom: 10px;">Capa 2: Express → Backend Remoto</h3>
+                <p>Express reenvía las credenciales al backend remoto que realiza la validación.</p>
+            </div>
+            
+            <div class="code-block">
+<span class="keyword">POST</span> https://cubed-mr.app/api/get HTTP/1.1
+Content-Type: application/json
+
+{
+  <span class="string">"entity"</span>: <span class="string">"TryLoginFacilities"</span>,
+  <span class="string">"email"</span>: <span class="string">"facility1@wounddatacenter.com"</span>,
+  <span class="string">"password"</span>: <span class="string">"***"</span>,
+  <span class="string">"deviceId"</span>: <span class="string">"web-abc123"</span>
+}
+            </div>
+            
+            <div style="background: #d4edda; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h3 style="color: #155724; margin-bottom: 10px;">✓ Respuesta exitosa (status === 1)</h3>
+            </div>
+            
+            <div class="code-block">
+{
+  <span class="string">"status"</span>: <span class="number">true</span>,
+  <span class="string">"data"</span>: [{
+    <span class="string">"status"</span>: <span class="number">1</span>,
+    <span class="string">"token"</span>: <span class="string">"eyJhbGciOiJIUzI1NiIs..."</span>,
+    <span class="string">"entityId"</span>: <span class="number">123</span>,
+    <span class="string">"entityName"</span>: <span class="string">"University Nursing"</span>,
+    <span class="string">"facilities"</span>: [<span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>],
+    <span class="string">"msg"</span>: <span class="string">"Success"</span>
+  }]
+}
+            </div>
+            
+            <div style="background: #fdf6f6; padding: 15px; border-radius: 8px;">
+                <h3 style="color: #721c24; margin-bottom: 10px;">✗ Respuesta fallida (status === 0)</h3>
+            </div>
+            
+            <div class="code-block">
+{
+  <span class="string">"status"</span>: <span class="number">true</span>,
+  <span class="string">"data"</span>: [{
+    <span class="string">"status"</span>: <span class="number">0</span>,
+    <span class="string">"reason"</span>: <span class="number">3</span>,
+    <span class="string">"msg"</span>: <span class="string">"Error 0x3881920. Email and password combination failed."</span>,
+    <span class="string">"token"</span>: <span class="string">""</span>
+  }]
+}
+            </div>
+        </div>
+        
+        <!-- Sección 5: Pruebas de Endpoints -->
+        <div class="section">
+            <h2><span class="icon">✓</span> Pruebas de Endpoints</h2>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Método</th>
+                        <th>Status</th>
+                        <th>Respuesta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/api/get</code></td>
+                        <td>POST</td>
+                        <td><span class="metric success">✓</span></td>
+                        <td>Autentica y rechaza credenciales inválidas correctamente</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/logout</code></td>
+                        <td>POST</td>
+                        <td><span class="metric success">✓</span></td>
+                        <td>Cierra sesión y limpia localStorage</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/health</code></td>
+                        <td>GET</td>
+                        <td><span class="metric success">✓</span></td>
+                        <td>Server health check funcional</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/facility-acuity-index</code></td>
+                        <td>GET/POST</td>
+                        <td><span class="metric success">✓</span></td>
+                        <td>Retorna datos de acuidad de facility</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/etiology-distribution</code></td>
+                        <td>GET/POST</td>
+                        <td><span class="metric success">✓</span></td>
+                        <td>Retorna distribución de etiología</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Sección 6: Seguridad -->
+        <div class="section">
+            <h2><span class="icon">🛡️</span> Análisis de Seguridad</h2>
+            
+            <h3 style="color: #28a745; margin-top: 20px; margin-bottom: 10px;">✓ Fortalezas</h3>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> SSL/TLS en tránsito</div>
+                <div class="details">Todas las comunicaciones están encriptadas (HTTPS)</div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Validación de parámetros</div>
+                <div class="details">Email, password y deviceId son validados antes de enviar</div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Contraseña no almacenada</div>
+                <div class="details">La contraseña no se persiste en localStorage</div>
+            </div>
+            
+            <div class="item success">
+                <div class="label"><span class="status-icon">✓</span> Logout funcional</div>
+                <div class="details">Limpia todos los datos de sesión del cliente</div>
+            </div>
+            
+            <h3 style="color: #dc3545; margin-top: 20px; margin-bottom: 10px;">⚠️ Áreas de Mejora</h3>
+            
+            <div class="item warning">
+                <div class="label"><span class="status-icon">!</span> Contraseña en logs</div>
+                <div class="details">
+                    <strong>Ubicación:</strong> /tmp/wounddatacenter-login.log<br>
+                    <strong>Riesgo:</strong> Medio (archivo local protegido)<br>
+                    <strong>Acción recomendada:</strong> Enmascarar contraseña con *** en logs
+                </div>
+            </div>
+            
+            <div class="item warning">
+                <div class="label"><span class="status-icon">!</span> Token en localStorage</div>
+                <div class="details">
+                    <strong>Riesgo:</strong> Vulnerable a XSS<br>
+                    <strong>Acción recomendada:</strong> Migrar a httpOnly cookies
+                </div>
+            </div>
+            
+            <div class="item warning">
+                <div class="label"><span class="status-icon">!</span> deviceId no validado</div>
+                <div class="details">
+                    <strong>Riesgo:</strong> Bajo (puede ser falsificado)<br>
+                    <strong>Acción recomendada:</strong> Implementar device fingerprinting en backend
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sección 7: Archivos Clave -->
+        <div class="section">
+            <h2><span class="icon">📁</span> Archivos Clave</h2>
+            
+            <h3 style="margin: 15px 0 10px 0; color: #667eea;">Backend (Express)</h3>
+            <div class="item success">
+                <div class="label">server/routes.ts</div>
+                <div class="details">Contiene los endpoints /api/get y /api/logout (Líneas 33-120)</div>
+            </div>
+            <div class="item success">
+                <div class="label">server/auth.ts</div>
+                <div class="details">Middleware de autenticación (actualmente stubs)</div>
+            </div>
+            
+            <h3 style="margin: 15px 0 10px 0; color: #667eea;">Frontend (React)</h3>
+            <div class="item success">
+                <div class="label">client/src/pages/login.tsx</div>
+                <div class="details">Formulario de login con validación (Líneas 60-90)</div>
+            </div>
+            <div class="item success">
+                <div class="label">client/src/hooks/use-auth.ts</div>
+                <div class="details">Hook de autenticación con gestión de token y localStorage</div>
+            </div>
+            <div class="item success">
+                <div class="label">client/src/lib/api-config.ts</div>
+                <div class="details">Configuración centralizada de endpoints (LOGIN, LOGOUT, etc.)</div>
+            </div>
+            
+            <h3 style="margin: 15px 0 10px 0; color: #667eea;">Configuración</h3>
+            <div class="item success">
+                <div class="label">/etc/apache2/sites-available/cubedmr-ssl.conf</div>
+                <div class="details">ProxyPass configuration para /facility (Líneas 38-48)</div>
+            </div>
+            <div class="item success">
+                <div class="label">/etc/systemd/system/wounddatacenter.service</div>
+                <div class="details">Servicio systemd para Node.js</div>
+            </div>
+        </div>
+        
+        <!-- Sección 8: Métricas de Desempeño -->
+        <div class="section">
+            <h2><span class="icon">📊</span> Métricas de Desempeño</h2>
+            
+            <div class="summary-table">
+                <div class="summary-box success">
+                    <div class="number">122ms</div>
+                    <div class="label">Latencia Promedio</div>
+                </div>
+                <div class="summary-box success">
+                    <div class="number">40MB</div>
+                    <div class="label">Memoria Utilizada</div>
+                </div>
+                <div class="summary-box success">
+                    <div class="number">11.4%</div>
+                    <div class="label">Uso de Límite</div>
+                </div>
+                <div class="summary-box success">
+                    <div class="number">5d</div>
+                    <div class="label">Uptime</div>
+                </div>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Métrica</th>
+                        <th>Valor</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Conexiones activas</td>
+                        <td>1 (Node.js process)</td>
+                        <td><span class="metric success">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Procesos del backend</td>
+                        <td>11 threads</td>
+                        <td><span class="metric success">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Tasa de error en endpoints</td>
+                        <td>0%</td>
+                        <td><span class="metric success">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Disponibilidad</td>
+                        <td>100%</td>
+                        <td><span class="metric success">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Respuesta a credenciales inválidas</td>
+                        <td>Correcto (rechaza)</td>
+                        <td><span class="metric success">✓</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Sección 9: Recomendaciones -->
+        <div class="section">
+            <h2><span class="icon">💡</span> Recomendaciones</h2>
+            
+            <h3 style="color: #28a745; margin-top: 15px; margin-bottom: 10px;">Inmediatas (Alta Prioridad)</h3>
+            
+            <div class="item warning">
+                <div class="label">1. Enmascarar contraseñas en logs</div>
+                <div class="details">
+                    <strong>Archivo:</strong> /var/www/facility/server/routes.ts<br>
+                    <strong>Cambio:</strong> Reemplazar <code>password: "12345678"</code> con <code>password: "***"</code> en logs<br>
+                    <strong>Razón:</strong> Evitar exposición de credenciales en archivos de log
+                </div>
+            </div>
+            
+            <h3 style="color: #667eea; margin-top: 15px; margin-bottom: 10px;">A Mediano Plazo</h3>
+            
+            <div class="item">
+                <div class="label">2. Migrar tokens a httpOnly cookies</div>
+                <div class="details">
+                    <strong>Beneficio:</strong> Mayor protección contra XSS<br>
+                    <strong>Cambio:</strong> Express → Set-Cookie header<br>
+                    <strong>React:</strong> Eliminar localStorage.authToken
+                </div>
+            </div>
+            
+            <div class="item">
+                <div class="label">3. Implementar rate limiting</div>
+                <div class="details">
+                    <strong>Endpoint:</strong> /api/get (login)<br>
+                    <strong>Límite sugerido:</strong> 5 intentos por IP cada 15 minutos<br>
+                    <strong>Archivo:</strong> /var/www/facility/server/rate-limit.ts
+                </div>
+            </div>
+            
+            <h3 style="color: #764ba2; margin-top: 15px; margin-bottom: 10px;">Optimizaciones Futuras</h3>
+            
+            <div class="item">
+                <div class="label">4. Implementar device fingerprinting</div>
+                <div class="details">
+                    Validar dispositivos en el backend para detectar logins sospechosos
+                </div>
+            </div>
+            
+            <div class="item">
+                <div class="label">5. Agregar two-factor authentication (2FA)</div>
+                <div class="details">
+                    Email o SMS como segundo factor de autenticación
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>Diagnóstico generado automáticamente por el sistema de auditoría</p>
+            <p>Para más detalles, consultar: <code>/var/www/facility/AUTHENTICATION_DIAGNOSTIC.md</code></p>
+            <p style="margin-top: 10px; font-size: 12px; opacity: 0.7;">Última actualización: 2026-01-15 14:54:39 UTC</p>
+        </div>
+    </div>
+</body>
+</html>

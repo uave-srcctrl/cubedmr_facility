@@ -9,7 +9,11 @@ import {
   LogOut,
   Menu,
   X,
-  Stethoscope
+  Stethoscope,
+  Building2,
+  Check,
+  ChevronDown,
+  Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -18,25 +22,72 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useAuth } from "@/hooks/use-auth";
+import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
 interface LayoutProps {
   children: React.ReactNode;
-  user: { name: string; role: string } | null;
+  user: { name: string; role: string; email?: string } | null;
   onLogout: () => void;
 }
 
 export default function Layout({ children, user, onLogout }: LayoutProps) {
+  console.log('[Layout] Component mounted/rendered with user:', user?.name);
   const [location] = useLocation();
+  console.log('[Layout] Current location:', location);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  
+  // Facility management
+  const { 
+    getSelectedFacility,
+    setSelectedFacility,
+    getSelectedFacilityInfo,
+    getAvailableFacilities
+  } = useAuth();
+
+  const [selectedFacilityId, setSelectedFacilityIdLocal] = useState<string | null>(null);
+  const [selectedFacilityInfo, setSelectedFacilityInfoLocal] = useState<any>(null);
+  const [facilities, setFacilitiesLocal] = useState<any[]>([]);
+
+  // Load facility info on mount and when it changes
+  useEffect(() => {
+    const loadFacilityInfo = () => {
+      const selected = getSelectedFacility();
+      const info = getSelectedFacilityInfo();
+      const available = getAvailableFacilities();
+      
+      setSelectedFacilityIdLocal(selected);
+      setSelectedFacilityInfoLocal(info);
+      setFacilitiesLocal(available);
+    };
+
+    loadFacilityInfo();
+
+    // Listen for facility changes
+    const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, () => {
+      loadFacilityInfo();
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const handleChangeFacility = (facilityId: string) => {
+    console.log(`[Layout] Changing facility to: ${facilityId}`);
+    setSelectedFacility(facilityId);
+    setSelectedFacilityIdLocal(facilityId);
+  }
 
   const navigation = [
-    { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    { name: "Facility Wound Report", href: "/facility-report", icon: FileText },
-    { name: "Outcome Report Global", href: "/outcome-report", icon: Activity },
-    { name: "Wound Etiology", href: "/etiology-report", icon: PieChart },
-    { name: "Acuity Index", href: "/acuity-report", icon: Stethoscope },
+    { name: "Dashboard", href: "/facility/", icon: LayoutDashboard },
+    { name: "Facility Wound Report", href: "/facility/facility-report", icon: FileText },
+    { name: "Outcome Report Global", href: "/facility/outcome-report", icon: Activity },
+    { name: "Wound Etiology", href: "/facility/etiology-report", icon: PieChart },
+    { name: "Acuity Index", href: "/facility/acuity-report", icon: Stethoscope },
+    { name: "Import Excel", href: "/facility/excel-import", icon: Upload },
   ];
 
   const SidebarContent = () => (
@@ -49,6 +100,77 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
           <span>WoundCare<span className="font-light text-muted-foreground">Analytics</span></span>
         </div>
       </div>
+
+      {/* ===== FACILITY SELECTOR DROPDOWN ===== */}
+      {facilities.length > 0 && (
+        <div className="px-4 py-4 border-b border-sidebar-border bg-sidebar-accent/30">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Current Facility
+          </label>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full mt-2.5 px-3 py-2.5 rounded-md border border-input bg-background/80 hover:bg-background transition-colors flex items-center justify-between text-sm font-medium group">
+                <span className="flex items-center gap-2 truncate text-foreground">
+                  <Building2 className="h-4 w-4 flex-shrink-0 text-primary" />
+                  <span className="truncate text-sm">
+                    {selectedFacilityInfo?.name || "Select facility"}
+                  </span>
+                </span>
+                <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground group-hover:text-foreground transition-colors" />
+              </button>
+            </DropdownMenuTrigger>
+            
+            <DropdownMenuContent align="start" className="w-56" side="right">
+              <DropdownMenuLabel className="flex items-center gap-2">
+                <Building2 className="h-4 w-4" />
+                Change Facility
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              
+              {facilities.length === 0 ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                  No facilities available
+                </div>
+              ) : (
+                facilities.map((facility: any) => (
+                  <DropdownMenuItem
+                    key={facility.id}
+                    onClick={() => handleChangeFacility(facility.id)}
+                    className={cn(
+                      "cursor-pointer gap-2",
+                      selectedFacilityId === facility.id && "bg-primary/10"
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full gap-2">
+                      <div className="flex items-center gap-2 flex-1">
+                        <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1 truncate">
+                          <div className="font-medium text-sm truncate">
+                            {facility.name}
+                          </div>
+                          {facility.activePatients !== undefined && (
+                            <div className="text-xs text-muted-foreground">
+                              {facility.activePatients} active
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Checkmark para facility actual */}
+                      {selectedFacilityId === facility.id && (
+                        <Check className="h-4 w-4 text-primary flex-shrink-0" />
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+      {/* ===== FIN FACILITY SELECTOR DROPDOWN ===== */}
+
       <div className="flex-1 overflow-y-auto py-6 px-3">
         <nav className="space-y-1">
           {navigation.map((item) => {
@@ -79,12 +201,11 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3 px-2 mb-4">
           <Avatar className="h-9 w-9 border border-sidebar-border">
-            <AvatarImage src="https://github.com/shadcn.png" />
-            <AvatarFallback>DR</AvatarFallback>
+            <AvatarFallback>{user?.name?.charAt(0) || "D"}</AvatarFallback>
           </Avatar>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">{user?.name || "Dr. Smith"}</span>
-            <span className="text-xs text-muted-foreground">{user?.role || "Facility Admin"}</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium truncate">{user?.name || "User"}</span>
+            <span className="text-xs text-muted-foreground truncate">{user?.email || "No email"}</span>
           </div>
         </div>
         <Button 

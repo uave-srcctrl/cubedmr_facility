@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Calendar as CalendarIcon, Loader2, AlertCircle, RefreshCcw } from "lucide-react";
@@ -10,6 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useAuth } from "@/hooks/use-auth";
+import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { DataSourceBadge } from "@/components/data-source-badge";
+import { EcgLoader } from "@/components/ecg-loader";
+import { LOCAL_API, getFacilityId } from "@/lib/api-config";
+import { normalizeFieldNamesArray } from "@/lib/field-mapper";
 
 // Colors for the chart
 const COLORS = [
@@ -30,37 +36,107 @@ interface EtiologyItem {
 }
 
 export default function EtiologyReport() {
-  const [date, setDate] = useState<Date>(new Date('2025-11-16'));
+  const { getAuthInfo, getToken } = useAuth();
+  const authInfo = getAuthInfo();
+  const facilityId = getFacilityId(authInfo.entityId);
+  
+  // If no facilityId, show error - shouldn't happen if auth is working
+  if (!facilityId) {
+    return (
+      <div className="space-y-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Authentication Error</AlertTitle>
+          <AlertDescription>
+            Missing facility information. Please log in again.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
+  const token = getToken();
+  
+  const [date, setDate] = useState<Date>(new Date());
+  const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['etiologyReport', format(date, 'yyyy-MM-dd')],
+    queryKey: ['etiologyReport', format(date, 'yyyy-MM-dd'), facilityId],
     queryFn: async () => {
       const formattedDate = format(date, 'yyyy-MM-dd');
-      const facilityId = '5';
-      const url = `https://cubed-mr.app/api/reports/etiology-distribution/${facilityId}/${formattedDate}`;
+      const url = `${LOCAL_API.ETIOLOGY_DISTRIBUTION}?date=${formattedDate}`;
       
-      const response = await fetch(url);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Facility-Id": facilityId,
+      };
+      
+      // Add authentication header if available
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(url, { 
+        method: "GET",
+        headers 
+      });
       
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.statusText}`);
       }
       
       const result = await response.json();
-      // Handle if result is wrapped in { data: ... } or is array directly
-      // Also normalize keys if needed. Assuming API returns array of objects.
-      return Array.isArray(result) ? result : (result.data || []);
+      console.log('[EtiologyReport] Received response:', result);
+      
+      // Handle if result is wrapped in array or object
+      // etiology returns an array of items (not a single object like wound-outcome)
+      let data;
+      if (result.status === false) {
+        throw new Error(result.error || "Failed to fetch etiology data");
+      }
+      
+      if (Array.isArray(result.data)) {
+        data = result.data;
+      } else if (result.data && Array.isArray(result.data)) {
+        data = result.data;
+      } else if (Array.isArray(result)) {
+        data = result;
+      } else {
+        data = [];
+      }
+      // Normalize field names from backend format
+      return normalizeFieldNamesArray(data);
     }
   });
+
+  // Track data source based on response - use useEffect to properly update state
+  useEffect(() => {
+    if (!isLoading && !error && data && data.length > 0) {
+      // Data loaded successfully from backend
+      setDataSource('backend');
+    } else if (error) {
+      // Error occurred, using mock
+      setDataSource('mock');
+    }
+  }, [data, error, isLoading]);
 
   // Process data for charts and tables
   // We expect the API to return objects. We might need to map keys if they differ.
   // Based on user prompt: "Wound Etiology", "Count", "Percentage"
-  const processedData = (data || []).map((item: any) => ({
-    name: item.woundEtiology || item['Wound Etiology'] || item.name || 'Unknown',
-    value: Number(item.count || item.Count || item.value || 0),
-    percentage: Number(item.percentage || item.Percentage || 0),
-    fill: COLORS[0] // Placeholder, will assign in render
-  })).map((item: any, index: number) => ({
+  const processedData = (data || []).map((item: any) => {
+    let etiologyName = item.woundEtiology || item['Wound Etiology'] || item.name || 'Unknown';
+    // Replace 'null' string with 'Other'
+    if (etiologyName === 'null' || etiologyName === null) {
+      etiologyName = 'Other';
+    }
+    return {
+      name: etiologyName,
+      value: Number(item.count || item.Count || item.value || 0),
+      percentage: Number(item.percentage || item.Percentage || 0),
+      fill: COLORS[0] // Placeholder, will assign in render
+    };
+  }).map((item: any, index: number) => ({
     ...item,
     fill: COLORS[index % COLORS.length]
   }));
@@ -68,20 +144,21 @@ export default function EtiologyReport() {
   const totalCount = processedData.reduce((acc: number, curr: any) => acc + curr.value, 0);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
-            <p className="text-muted-foreground mt-1">Breakdown of wound types by classification and frequency</p>
-        </div>
-        
-        <div className="flex items-center gap-2">
+    <div className="space-y-6">
+      <div>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+              <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
+              <p className="text-muted-foreground mt-1">Breakdown of wound types by classification and frequency</p>
+          </div>
+          
+          <div className="flex items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
               <Button
                 variant={"outline"}
                 className={cn(
-                  "w-[240px] justify-start text-left font-normal",
+                  "w-[288px] justify-start text-left font-normal",
                   !date && "text-muted-foreground"
                 )}
               >
@@ -89,12 +166,13 @@ export default function EtiologyReport() {
                 {date ? format(date, "PPP") : <span>Pick a date</span>}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
+            <PopoverContent className="w-[288px] p-0" align="end">
               <Calendar
                 mode="single"
                 selected={date}
                 onSelect={(d) => d && setDate(d)}
                 initialFocus
+                className="w-full"
               />
             </PopoverContent>
           </Popover>
@@ -103,6 +181,9 @@ export default function EtiologyReport() {
           </Button>
         </div>
       </div>
+      </div>
+      
+      <FacilityInfoBanner facilityId={facilityId} facilityName={facilityName} />
 
       {error ? (
         <Alert variant="destructive">
@@ -128,44 +209,70 @@ export default function EtiologyReport() {
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
             <Card>
-                <CardHeader>
+                <CardHeader className="relative pb-2">
                     <CardTitle>Visual Distribution</CardTitle>
                     <CardDescription>Proportion of wound types for {format(date, 'PPP')}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="h-[350px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                            data={processedData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={80}
-                            outerRadius={120}
-                            paddingAngle={2}
-                            dataKey="value"
-                            >
-                            {processedData.map((entry: any, index: number) => (
-                                <Cell key={`cell-${index}`} fill={entry.fill} />
-                            ))}
-                            </Pie>
-                            <Tooltip 
-                                contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
-                                itemStyle={{ color: 'hsl(var(--popover-foreground))' }}
-                            />
-                            <Legend verticalAlign="bottom" height={36} />
-                        </PieChart>
-                        </ResponsiveContainer>
+                    <div className="absolute top-4 right-4">
+                        <DataSourceBadge source={dataSource} showLabel={false} />
                     </div>
+                </CardHeader>
+                <CardContent className="relative pl-2 pr-2">
+                    {isLoading ? (
+                        <EcgLoader title="Loading Visual Distribution..." minHeight="min-h-[330px]" />
+                    ) : (
+                        <div className="flex h-[330px] w-full gap-4 pl-1.25">
+                        {/* Legend on the left with scroll */}
+                        <div className="w-24 overflow-y-auto flex-shrink-0 py-8">
+                            <div className="space-y-2">
+                                {processedData.map((entry: any, index: number) => (
+                                    <div key={`legend-${index}`} className="flex items-center gap-2 whitespace-nowrap">
+                                        <div 
+                                            className="w-3 h-3 rounded-sm flex-shrink-0" 
+                                            style={{ backgroundColor: entry.fill }}
+                                        />
+                                        <span className="truncate text-xs">{entry.name}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        {/* Chart */}
+                        <div className="flex-1 min-w-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                                    <Pie
+                                        data={processedData}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={90}
+                                        outerRadius={135}
+                                        paddingAngle={5}
+                                        dataKey="value"
+                                    >
+                                        {processedData.map((entry: any, index: number) => (
+                                            <Cell key={`cell-${index}`} fill={entry.fill} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip 
+                                        contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
+                                        itemStyle={{ color: 'hsl(var(--popover-foreground))' }}
+                                    />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    )}
                 </CardContent>
             </Card>
 
             <Card>
-            <CardHeader>
+            <CardHeader className="relative pb-2">
                 <CardTitle>Detailed Etiology Count</CardTitle>
                 <CardDescription>Specific count and percentage for each wound type</CardDescription>
+                <div className="absolute top-4 right-4">
+                    <DataSourceBadge source={dataSource} showLabel={false} />
+                </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="relative pb-0">
                 <Table>
                 <TableHeader>
                     <TableRow>
@@ -179,7 +286,7 @@ export default function EtiologyReport() {
                     <TableRow key={item.name}>
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="text-right">{item.value}</TableCell>
-                        <TableCell className="text-right">{item.percentage}%</TableCell>
+                        <TableCell className="text-right">{item.percentage.toFixed(2)}%</TableCell>
                     </TableRow>
                     ))}
                     <TableRow className="bg-muted/50 font-bold">

@@ -5,6 +5,33 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Mock Data for Dashboard KPI Cards
+export const dashboardKPIs = {
+  activeWounds: {
+    value: 42,
+    trend: 4,
+    label: "Active Wounds",
+    period: "from last month"
+  },
+  healingRate: {
+    value: 72,
+    trend: 2.5,
+    label: "Healing Rate",
+    unit: "%",
+    period: "improvement"
+  },
+  reportsGenerated: {
+    value: 128,
+    label: "Reports Generated",
+    period: "In the last 30 days"
+  },
+  criticalCases: {
+    value: 3,
+    label: "Critical Cases",
+    period: "Requiring immediate attention"
+  }
+};
+
 // Mock Data for Charts
 export const woundEtiologyData = [
   { name: "Pressure Ulcer", value: 45, fill: "hsl(var(--chart-1))" },

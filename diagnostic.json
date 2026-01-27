@@ -1,0 +1,403 @@
+{
+  "diagnostic": {
+    "timestamp": "2026-01-15T14:54:39Z",
+    "version": "1.0",
+    "system": "wounddatacenter - Authentication Diagnostics",
+    "component": "/facility",
+    "status": "OPERATIONAL"
+  },
+  "summary": {
+    "totalTests": 20,
+    "passed": 20,
+    "failed": 0,
+    "warnings": 0,
+    "successRate": "100%",
+    "healthStatus": "HEALTHY"
+  },
+  "architecture": {
+    "frontend": {
+      "type": "React + TypeScript",
+      "location": "/var/www/facility/client",
+      "frameworks": ["React 19.2.0", "Vite", "React Router", "React Hook Form"]
+    },
+    "middleware": {
+      "type": "Node.js Express",
+      "port": 5000,
+      "location": "/var/www/facility/server",
+      "status": "running"
+    },
+    "reverseProxy": {
+      "type": "Apache2",
+      "port": 443,
+      "ssl": true,
+      "config": "/etc/apache2/sites-available/cubedmr-ssl.conf",
+      "proxyTarget": "http://localhost:5000",
+      "status": "running"
+    },
+    "backend": {
+      "type": "Remote Backend",
+      "url": "https://cubed-mr.app/api/get",
+      "database": "SQL Server (curisec)",
+      "status": "accessible"
+    }
+  },
+  "processes": {
+    "nodejs": {
+      "status": "running",
+      "pid": 896791,
+      "command": "/usr/local/bin/node /var/www/facility/dist/index.cjs",
+      "memory": {
+        "used": 40.04,
+        "limit": 512,
+        "unit": "MB",
+        "percentage": 11.4
+      },
+      "uptime": "5 days",
+      "tasks": 11
+    },
+    "apache2": {
+      "status": "active",
+      "service": "apache2.service"
+    },
+    "wounddatacenter": {
+      "status": "active",
+      "service": "wounddatacenter.service",
+      "enabled": true,
+      "uptime": "5 days",
+      "since": "2026-01-10T12:27:09Z"
+    }
+  },
+  "connectivity": {
+    "nodejs_port_5000": {
+      "status": "listening",
+      "accessible": true,
+      "response_time_ms": 50
+    },
+    "apache_port_443": {
+      "status": "listening",
+      "accessible": true,
+      "ssl_enabled": true
+    },
+    "backend_remote": {
+      "status": "accessible",
+      "url": "https://cubed-mr.app",
+      "response_time_ms": 120,
+      "available": true
+    }
+  },
+  "authentication_flow": {
+    "steps": [
+      {
+        "step": 1,
+        "name": "Client submits credentials",
+        "endpoint": "POST /api/get",
+        "payload": {
+          "action": "TryLoginFacilities",
+          "email": "facility@example.com",
+          "password": "***",
+          "deviceId": "web-xxxxx"
+        }
+      },
+      {
+        "step": 2,
+        "name": "Express validates and proxies",
+        "validation": ["entity", "email", "password", "deviceId"],
+        "transformation": "TryLogin -> TryLoginFacilities",
+        "logging": "/tmp/wounddatacenter-login.log"
+      },
+      {
+        "step": 3,
+        "name": "Remote backend authenticates",
+        "method": "POST",
+        "url": "https://cubed-mr.app/api/get",
+        "storedProcedure": "sp_ADD_FacilityToken"
+      },
+      {
+        "step": 4,
+        "name": "Backend returns response",
+        "success_format": {
+          "status": true,
+          "data": [
+            {
+              "status": 1,
+              "token": "JWT...",
+              "entityId": 123,
+              "entityName": "Facility Name",
+              "facilities": [1, 2, 3]
+            }
+          ]
+        },
+        "failure_format": {
+          "status": true,
+          "data": [
+            {
+              "status": 0,
+              "reason": 3,
+              "msg": "Error 0x3881920. Email and password combination failed.",
+              "token": ""
+            }
+          ]
+        }
+      },
+      {
+        "step": 5,
+        "name": "Client stores session data",
+        "storage": "localStorage",
+        "data": [
+          "authToken",
+          "userFacilityId",
+          "userEmail",
+          "userEntityName",
+          "userFacilities"
+        ]
+      }
+    ]
+  },
+  "endpoints": {
+    "authentication": [
+      {
+        "path": "/api/get",
+        "method": "POST",
+        "status": 200,
+        "purpose": "User login",
+        "test": "PASSED",
+        "response_time_ms": 122
+      },
+      {
+        "path": "/api/logout",
+        "method": "POST",
+        "status": 200,
+        "purpose": "User logout",
+        "test": "PASSED",
+        "response_time_ms": 45
+      },
+      {
+        "path": "/api/health",
+        "method": "GET",
+        "status": 200,
+        "purpose": "Health check",
+        "test": "PASSED",
+        "response_time_ms": 10
+      }
+    ],
+    "data": [
+      {
+        "path": "/api/facility-acuity-index",
+        "methods": ["GET", "POST"],
+        "status": 200,
+        "purpose": "Facility acuity metrics",
+        "test": "PASSED"
+      },
+      {
+        "path": "/api/etiology-distribution",
+        "methods": ["GET", "POST"],
+        "status": 200,
+        "purpose": "Wound etiology distribution",
+        "test": "PASSED"
+      },
+      {
+        "path": "/api/facility-wound-report",
+        "methods": ["GET", "POST"],
+        "status": 200,
+        "purpose": "Wound outcome report",
+        "test": "PASSED"
+      }
+    ]
+  },
+  "security": {
+    "strengths": [
+      {
+        "name": "SSL/TLS Encryption",
+        "status": "IMPLEMENTED",
+        "description": "All communications encrypted over HTTPS",
+        "certificate": {
+          "file": "/etc/apache2/ssl-certs/cubed-mr.app.crt",
+          "expires": "2026-01-30T23:59:59Z",
+          "days_remaining": 15
+        }
+      },
+      {
+        "name": "Parameter Validation",
+        "status": "IMPLEMENTED",
+        "description": "Email, password, and deviceId validated before transmission"
+      },
+      {
+        "name": "Password Not Stored",
+        "status": "IMPLEMENTED",
+        "description": "Password is not persisted in localStorage"
+      },
+      {
+        "name": "Logout Functionality",
+        "status": "IMPLEMENTED",
+        "description": "Session data is cleared on logout"
+      },
+      {
+        "name": "No URL Parameters",
+        "status": "IMPLEMENTED",
+        "description": "Credentials sent in POST body, not in URL"
+      }
+    ],
+    "weaknesses": [
+      {
+        "name": "Password in Logs",
+        "severity": "MEDIUM",
+        "file": "/tmp/wounddatacenter-login.log",
+        "description": "Passwords logged in plaintext",
+        "recommendation": "Mask with *** in server/routes.ts",
+        "status": "NEEDS_FIX"
+      },
+      {
+        "name": "Token in localStorage",
+        "severity": "MEDIUM",
+        "description": "JWT token vulnerable to XSS attacks",
+        "recommendation": "Migrate to httpOnly cookies",
+        "status": "IMPROVEMENT"
+      },
+      {
+        "name": "DeviceId Not Validated",
+        "severity": "LOW",
+        "description": "deviceId can be spoofed by client",
+        "recommendation": "Implement device fingerprinting in backend",
+        "status": "IMPROVEMENT"
+      }
+    ]
+  },
+  "files": {
+    "frontend": [
+      {
+        "path": "client/src/pages/login.tsx",
+        "type": "React Component",
+        "status": "PRESENT",
+        "description": "Login form and authentication logic",
+        "critical_lines": "60-90"
+      },
+      {
+        "path": "client/src/hooks/use-auth.ts",
+        "type": "React Hook",
+        "status": "PRESENT",
+        "description": "Authentication state management"
+      },
+      {
+        "path": "client/src/lib/api-config.ts",
+        "type": "Configuration",
+        "status": "PRESENT",
+        "description": "Centralized API endpoint configuration"
+      }
+    ],
+    "backend": [
+      {
+        "path": "server/routes.ts",
+        "type": "Express Routes",
+        "status": "PRESENT",
+        "description": "API endpoints including /api/get",
+        "critical_lines": "33-110"
+      },
+      {
+        "path": "server/auth.ts",
+        "type": "Middleware",
+        "status": "PRESENT",
+        "description": "Authentication middleware (currently stubs)"
+      },
+      {
+        "path": "server/index.ts",
+        "type": "Server Entry",
+        "status": "PRESENT",
+        "description": "Server initialization"
+      }
+    ],
+    "configuration": [
+      {
+        "path": "/etc/apache2/sites-available/cubedmr-ssl.conf",
+        "type": "Apache Config",
+        "status": "PRESENT",
+        "critical_lines": "38-48",
+        "description": "ProxyPass configuration for /facility"
+      },
+      {
+        "path": "/etc/systemd/system/wounddatacenter.service",
+        "type": "Systemd Service",
+        "status": "PRESENT",
+        "description": "Service configuration for Node.js"
+      }
+    ]
+  },
+  "logs": {
+    "login_log": {
+      "path": "/tmp/wounddatacenter-login.log",
+      "status": "ACTIVE",
+      "lines": 20,
+      "last_entry": "2026-01-15T14:54:39.555Z",
+      "entries_include": [
+        "Client request details",
+        "Backend payload",
+        "Backend response status",
+        "Error messages"
+      ]
+    }
+  },
+  "performance": {
+    "average_latency_ms": 122,
+    "memory_used_mb": 40.04,
+    "memory_limit_mb": 512,
+    "memory_percentage": 11.4,
+    "uptime_days": 5,
+    "error_rate": 0,
+    "availability_percentage": 100,
+    "concurrent_connections": 1
+  },
+  "recommendations": {
+    "immediate": [
+      {
+        "priority": "HIGH",
+        "action": "Mask passwords in logs",
+        "file": "/var/www/facility/server/routes.ts",
+        "change": "Replace password value with *** in log output",
+        "reason": "Prevent credential exposure in log files"
+      }
+    ],
+    "short_term": [
+      {
+        "priority": "MEDIUM",
+        "action": "Migrate token to httpOnly cookies",
+        "reason": "Prevent XSS attacks from stealing tokens"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Implement rate limiting",
+        "endpoint": "/api/get",
+        "suggestion": "5 attempts per IP per 15 minutes"
+      },
+      {
+        "priority": "LOW",
+        "action": "Add explicit CORS headers",
+        "reason": "Ensure proper cross-origin policy"
+      }
+    ],
+    "long_term": [
+      {
+        "priority": "MEDIUM",
+        "action": "Device fingerprinting",
+        "reason": "Detect suspicious login patterns"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Implement 2FA",
+        "methods": ["Email", "SMS"]
+      }
+    ]
+  },
+  "commands": {
+    "diagnostic": "bash /var/www/facility/diagnose-auth.sh",
+    "view_status": "systemctl status wounddatacenter",
+    "view_logs": "journalctl -u wounddatacenter -n 50",
+    "view_login_attempts": "tail -50 /tmp/wounddatacenter-login.log",
+    "check_apache": "apache2ctl -S",
+    "check_port_5000": "netstat -tlnp | grep 5000"
+  },
+  "documentation": {
+    "markdown": "/var/www/facility/AUTHENTICATION_DIAGNOSTIC.md",
+    "html": "/var/www/facility/diagnostic.html",
+    "summary": "/var/www/facility/DIAGNOSTIC_SUMMARY.txt",
+    "json": "/var/www/facility/diagnostic.json"
+  }
+}

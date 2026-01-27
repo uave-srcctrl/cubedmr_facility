@@ -1,4 +1,6 @@
 node_modules
+docs
+old
 dist
 .DS_Store
 server/public

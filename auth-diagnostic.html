@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico de Autenticación - WoundCare Analytics</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 30px;
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section-title .number {
+            width: 30px;
+            height: 30px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            background: #f9fafb;
+            border-left: 4px solid #d1d5db;
+        }
+        
+        .status-item.success {
+            background: #ecfdf5;
+            border-left-color: #10b981;
+        }
+        
+        .status-item.error {
+            background: #fef2f2;
+            border-left-color: #ef4444;
+        }
+        
+        .status-item.warning {
+            background: #fffbeb;
+            border-left-color: #f59e0b;
+        }
+        
+        .status-icon {
+            font-size: 18px;
+            width: 24px;
+        }
+        
+        .status-content {
+            flex: 1;
+        }
+        
+        .status-title {
+            font-weight: 500;
+            color: #1f2937;
+        }
+        
+        .status-detail {
+            font-size: 13px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+        
+        .response-box {
+            background: #1f2937;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: "Courier New", monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .info-box {
+            background: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #1e40af;
+        }
+        
+        .error-box {
+            background: #fee2e2;
+            border-left: 4px solid #ef4444;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #991b1b;
+        }
+        
+        .success-box {
+            background: #ecfdf5;
+            border-left: 4px solid #10b981;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #065f46;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏥 Diagnóstico de Autenticación</h1>
+            <p>WoundCare Analytics - /facility Portal</p>
+        </div>
+        
+        <div class="content">
+            <!-- Sección 1: Estado del Servidor -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="number">1</span>
+                    Estado del Servidor
+                </div>
+                
+                <button class="btn-primary" onclick="checkServerStatus()">
+                    <span id="status-spinner"></span> Verificar Estado
+                </button>
+                
+                <div id="server-status" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- Sección 2: Verificar Conectividad -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="number">2</span>
+                    Conectividad
+                </div>
+                
+                <button class="btn-primary" onclick="checkConnectivity()">
+                    Verificar Conectividad
+                </button>
+                
+                <div id="connectivity-status" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- Sección 3: Prueba de Login -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="number">3</span>
+                    Probar Login
+                </div>
+                
+                <div class="info-box">
+                    <strong>Ingresa credenciales válidas para probar el login</strong>
+                </div>
+                
+                <div class="grid">
+                    <div class="form-group">
+                        <label for="login-email">Email de Facilidad</label>
+                        <input type="email" id="login-email" placeholder="facility@example.com" value="facility1@wounddatacenter.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Contraseña</label>
+                        <input type="password" id="login-password" placeholder="••••••••" value="12345678">
+                    </div>
+                </div>
+                
+                <button class="btn-primary" onclick="testLogin()">
+                    Probar Login
+                </button>
+                
+                <div id="login-response" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- Sección 4: Logs -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="number">4</span>
+                    Logs Recientes
+                </div>
+                
+                <button class="btn-primary" onclick="loadLogs()">
+                    Cargar Logs
+                </button>
+                
+                <div id="logs-section" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- Sección 5: Información de Códigos -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="number">5</span>
+                    Códigos de Error
+                </div>
+                
+                <div class="info-box">
+                    <strong>Status = 1:</strong> Login exitoso ✓<br><br>
+                    <strong>Status = 0, Reason = 1:</strong> Facilidad ya autenticada en otro dispositivo<br>
+                    Solución: Limpiar localStorage o contactar administrador<br><br>
+                    <strong>Status = 0, Reason = 3:</strong> Email y contraseña no coinciden<br>
+                    Solución: Verificar credenciales o contactar administrador
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.protocol + '//' + window.location.host;
+        const API_ENDPOINT = '/api/get';
+        
+        function addStatus(elementId, success, title, details) {
+            const container = document.getElementById(elementId);
+            if (!container) return;
+            
+            const statusClass = success ? 'success' : 'error';
+            const icon = success ? '✓' : '✗';
+            const item = document.createElement('div');
+            item.className = `status-item ${statusClass}`;
+            item.innerHTML = `
+                <div class="status-icon">${icon}</div>
+                <div class="status-content">
+                    <div class="status-title">${title}</div>
+                    ${details ? `<div class="status-detail">${details}</div>` : ''}
+                </div>
+            `;
+            container.appendChild(item);
+        }
+        
+        async function checkServerStatus() {
+            const container = document.getElementById('server-status');
+            container.innerHTML = '<div class="loading"></div> Verificando...';
+            
+            try {
+                const response = await fetch(API_BASE + API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                
+                if (response.ok) {
+                    container.innerHTML = '';
+                    addStatus('server-status', true, 'Servidor Node.js', 'Responde correctamente en puerto 5000');
+                } else {
+                    container.innerHTML = '';
+                    addStatus('server-status', false, 'Servidor Node.js', `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                container.innerHTML = '';
+                addStatus('server-status', false, 'Servidor Node.js', error.message);
+            }
+        }
+        
+        async function checkConnectivity() {
+            const container = document.getElementById('connectivity-status');
+            container.innerHTML = '<div class="loading"></div> Verificando...';
+            
+            // Verificar localhost
+            try {
+                const response = await fetch('http://localhost:5000/api/get', {
+                    method: 'HEAD'
+                });
+                container.innerHTML = '';
+                addStatus('connectivity-status', true, 'Localhost:5000', 'Accesible');
+            } catch (error) {
+                container.innerHTML = '';
+                addStatus('connectivity-status', false, 'Localhost:5000', 'No accesible');
+            }
+        }
+        
+        async function testLogin() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const container = document.getElementById('login-response');
+            
+            if (!email || !password) {
+                container.innerHTML = '<div class="error-box">Por favor ingresa email y contraseña</div>';
+                return;
+            }
+            
+            container.innerHTML = '<div class="loading"></div> Probando login...';
+            
+            try {
+                const deviceId = 'web-diagnostic-' + Date.now();
+                const response = await fetch(API_BASE + API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        entity: 'TryLoginFacilities',
+                        email: email,
+                        password: password,
+                        deviceId: deviceId,
+                        name: email
+                    })
+                });
+                
+                const data = await response.json();
+                container.innerHTML = '';
+                
+                // Mostrar respuesta
+                const responseJson = JSON.stringify(data, null, 2);
+                container.innerHTML = `
+                    <div style="margin-bottom: 15px;">
+                        <strong>Respuesta del servidor:</strong>
+                        <div class="response-box">${responseJson}</div>
+                    </div>
+                `;
+                
+                // Analizar
+                if (data.data && data.data[0]) {
+                    const item = data.data[0];
+                    if (item.status === 1) {
+                        container.innerHTML += '<div class="success-box"><strong>✓ Login exitoso!</strong><br>ID de Facilidad: ' + item.entityId + '<br>Token: ' + (item.token ? 'Generado' : 'No generado') + '</div>';
+                    } else if (item.reason === 1) {
+                        container.innerHTML += '<div class="error-box"><strong>✗ Facilidad ya autenticada</strong><br>' + item.msg + '<br><br>Soluciones:<br>1. Limpiar localStorage (F12 → Application → Clear)<br>2. Usar navegación incógnito<br>3. Contactar administrador</div>';
+                    } else if (item.reason === 3) {
+                        container.innerHTML += '<div class="error-box"><strong>✗ Credenciales inválidas</strong><br>' + item.msg + '<br><br>Verifica:<br>1. Email correcto (mayúsculas/minúsculas)<br>2. Contraseña correcta<br>3. Que el email esté registrado</div>';
+                    }
+                }
+            } catch (error) {
+                container.innerHTML = '<div class="error-box"><strong>Error:</strong> ' + error.message + '</div>';
+            }
+        }
+        
+        async function loadLogs() {
+            const container = document.getElementById('logs-section');
+            container.innerHTML = '<div class="loading"></div> Cargando logs...';
+            
+            try {
+                // Este endpoint necesitaría implementarse en el servidor
+                container.innerHTML = '<div class="info-box">Los logs están en: /tmp/wounddatacenter-login.log<br><br>Para verlos, ejecuta en terminal:<br><code>tail -f /tmp/wounddatacenter-login.log</code></div>';
+            } catch (error) {
+                container.innerHTML = '<div class="error-box">Error al cargar logs: ' + error.message + '</div>';
+            }
+        }
+        
+        // Verificar estado al cargar
+        window.addEventListener('load', function() {
+            console.log('Diagnóstico de autenticación cargado');
+        });
+    </script>
+</body>
+</html>

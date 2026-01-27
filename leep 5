@@ -1,0 +1,12 @@
+[0;1;32m●[0m wounddatacenter.service - Wound Data Center - Node.js Server
+     Loaded: loaded (/etc/systemd/system/wounddatacenter.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Thu 2026-01-15 18:27:29 UTC; 3s ago
+   Main PID: 1020157 (node)
+      Tasks: 7 (limit: 19660)
+     Memory: 48.9M (limit: 512.0M)
+     CGroup: /system.slice/wounddatacenter.service
+             └─1020157 /usr/local/bin/node /var/www/facility/dist/index.cjs
+
+Jan 15 18:27:29 server.woundcareencounter.com systemd[1]: Stopped Wound Data Center - Node.js Server.
+Jan 15 18:27:29 server.woundcareencounter.com systemd[1]: Started Wound Data Center - Node.js Server.
+Jan 15 18:27:30 server.woundcareencounter.com wounddatacenter[1020157]: 6:27:30 PM [express] serving on port 5000

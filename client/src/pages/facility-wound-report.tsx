@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, subDays } from "date-fns";
+import { format, subDays, subMonths } from "date-fns";
 import { Calendar as CalendarIcon, FileDown, Loader2, AlertCircle, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,56 +12,120 @@ import {
 } from "@/components/ui/popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useAuth } from "@/hooks/use-auth";
+import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { DataSourceBadge } from "@/components/data-source-badge";
+import { LOCAL_API, getFacilityId } from "@/lib/api-config";
+import { normalizeFieldNames } from "@/lib/field-mapper";
 
 export default function FacilityWoundReport() {
-  const [startDate, setStartDate] = useState<Date | undefined>(subDays(new Date(), 30));
+  const { getAuthInfo } = useAuth();
+  const authInfo = getAuthInfo();
+  const facilityId = getFacilityId(authInfo.entityId);
+  
+  // If no facilityId, show error - shouldn't happen if auth is working
+  if (!facilityId) {
+    return (
+      <div className="space-y-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Authentication Error</AlertTitle>
+          <AlertDescription>
+            Missing facility information. Please log in again.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
+  
+  const [startDate, setStartDate] = useState<Date | undefined>(subMonths(new Date(), 12));
   const [endDate, setEndDate] = useState<Date | undefined>(new Date());
+  const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['facilityWoundReport', startDate ? format(startDate, 'yyyy-MM-dd') : null, endDate ? format(endDate, 'yyyy-MM-dd') : null],
+    queryKey: ['facilityWoundReport', startDate ? format(startDate, 'yyyy-MM-dd') : null, endDate ? format(endDate, 'yyyy-MM-dd') : null, facilityId],
     queryFn: async () => {
       if (!startDate || !endDate) return null;
 
       const formattedStartDate = format(startDate, 'yyyy-MM-dd');
       const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-      const facilityId = '5';
-      const url = `https://cubed-mr.app/api/reports/facility-wound-outcome/${facilityId}/${formattedStartDate}/${formattedEndDate}`;
+      
+      // Use local API endpoint with facility ID header
+      const url = `${LOCAL_API.FACILITY_WOUND_REPORT}?startDate=${formattedStartDate}&endDate=${formattedEndDate}`;
+      
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Facility-Id": facilityId,
+      };
 
-      const response = await fetch(url);
+      const response = await fetch(url, { method: "GET", headers });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.statusText}`);
       }
 
       const result = await response.json();
+      console.log('[FacilityWoundReport] Received response:', result);
+      
       // Handle if result is wrapped in array or object
-      return Array.isArray(result) ? result[0] : (result.data || result);
+      let data;
+      if (result.status === false) {
+        throw new Error(result.error || "Failed to fetch wound report");
+      }
+      
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        data = result.data[0];
+      } else if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
+        data = result.data;
+      } else {
+        data = result.data;
+      }
+      
+      // Normalize field names from backend format
+      return normalizeFieldNames(data);
     },
     enabled: !!startDate && !!endDate,
   });
+
+  // Track data source based on response - use useEffect to properly update state
+  useEffect(() => {
+    if (!isLoading && !error && data) {
+      // Data loaded successfully from backend
+      setDataSource('backend');
+    } else if (error) {
+      // Error occurred, using mock
+      setDataSource('mock');
+    }
+  }, [data, error, isLoading]);
 
   const reportData = data || {};
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Wound Report</h1>
-          <p className="text-muted-foreground mt-1">Operational metrics by Date of Service (DOS)</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" />
-          <span className="text-muted-foreground">-</span>
-          <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" />
-          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-            <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-          </Button>
-          <Button variant="default" className="ml-2">
-            <FileDown className="mr-2 h-4 w-4" />
-            Export PDF
-          </Button>
+      <div>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Wound Report</h1>
+            <p className="text-muted-foreground mt-1">Operational metrics by Date of Service (DOS)</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" />
+            <span className="text-muted-foreground">-</span>
+            <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" />
+            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+            </Button>
+            <Button variant="default" className="ml-2">
+              <FileDown className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+          </div>
         </div>
       </div>
+
+      <FacilityInfoBanner facilityId={facilityId} facilityName={facilityName} />
 
       {error ? (
         <Alert variant="destructive">
@@ -85,35 +149,37 @@ export default function FacilityWoundReport() {
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <StatCard title="Avg Wound Reduction" value={`${reportData.avgPercentWoundAreaReduction || reportData.AvgPercentWoundAreaReduction || 0}%`} trend="positive" />
-            <StatCard title="Wounds Improving" value={`${reportData.percentOfWoundsImproving || reportData.PercentOfWoundsImproving || 0}%`} trend="positive" />
-            <StatCard title="Wounds Deteriorating" value={`${reportData.percentOfWoundsDeteriorating || reportData.PercentOfWoundsDeteriorating || 0}%`} trend="negative" />
-            <StatCard title="Wounds Stable" value={`${reportData.percentOfWoundsStable || reportData.PercentOfWoundsStable || 0}%`} trend="neutral" />
+            <StatCard title="Avg Wound Reduction" value={`${(parseFloat(reportData.averageWoundAreaChange || 0)).toFixed(2)}cm\u00B2`} trend="positive" source={dataSource} />
+            <StatCard title="Wounds Improving" value={`${(parseFloat(reportData.improving || 0) * 100).toFixed(2)}%`} trend="positive" source={dataSource} />
+            <StatCard title="Wounds Deteriorating" value={`${(parseFloat(reportData.deteriorating || 0) * 100).toFixed(2)}%`} trend="negative" source={dataSource} />
+            <StatCard title="Wounds Stable" value={`${(parseFloat(reportData.stable || 0) * 100).toFixed(2)}%`} trend="neutral" source={dataSource} />
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle>Wound Activity Metrics</CardTitle>
+                <DataSourceBadge source={dataSource} showLabel={false} />
               </CardHeader>
               <CardContent className="grid gap-4">
-                 <MetricRow label="New Wounds (%)" value={`${reportData.percentOfNewWounds || reportData.PercentOfNewWounds || 0}%`} />
-                 <MetricRow label="Resolution Rate (%)" value={`${reportData.resolutionRate || reportData.ResolutionRate || 0}%`} />
-                 <MetricRow label="Number of New Wounds" value={reportData.numberOfNewWounds || reportData.NumberOfNewWounds || 0} />
-                 <MetricRow label="Number of Resolved Wounds" value={reportData.numberOfResolvedWounds || reportData.NumberOfResolvedWounds || 0} />
-                 <MetricRow label="Number of Active Wounds" value={reportData.numberOfActiveWounds || reportData.NumberOfActiveWounds || 0} />
-                 <MetricRow label="Wounds > 100 Days" value={reportData.numberOfWoundsOver100Days || reportData.NumberOfWoundsOver100Days || 0} highlight />
+                 <MetricRow label="New Wounds (%)" value={`${(parseFloat(reportData.percentOfNewWounds || 0) * 100).toFixed(2)}%`} />
+                 <MetricRow label="Resolution Rate (%)" value={`${(parseFloat(reportData.resolutionRate || 0) * 100).toFixed(2)}%`} />
+                 <MetricRow label="Number of New Wounds" value={parseFloat((reportData.newWounds || 0).toString()).toFixed(2)} />
+                 <MetricRow label="Number of Resolved Wounds" value={parseFloat((reportData.resolvedWounds || 0).toString()).toFixed(2)} />
+                 <MetricRow label="Number of Active Wounds" value={parseFloat((reportData.numberOfActiveWounds || 0).toString()).toFixed(2)} />
+                 <MetricRow label="Wounds > 100 Days" value={parseFloat((reportData.woundsOver100Days || 0).toString()).toFixed(2)} highlight />
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle>Patient & Acuity Metrics</CardTitle>
+                <DataSourceBadge source={dataSource} showLabel={false} />
               </CardHeader>
               <CardContent className="grid gap-4">
-                 <MetricRow label="Active Patients" value={reportData.numberOfActivePatients || reportData.NumberOfActivePatients || 0} />
-                 <MetricRow label="Facility Acuity Index" value={reportData.facilityAcuityIndex || reportData.FacilityAcuityIndex || 0} />
-                 <MetricRow label="PUSH Score Average" value={reportData.pushScoreAverage || reportData.PushScoreAverage || 0} />
+                 <MetricRow label="Active Patients" value={parseFloat((reportData.numberOfActivePatients || 0).toString()).toFixed(2)} />
+                 <MetricRow label="Facility Acuity Index" value={parseFloat((reportData.facilityAcuityIndex || 0).toString()).toFixed(2)} />
+                 <MetricRow label="PUSH Score Average" value={parseFloat((reportData.pushScoreAverage || 0).toString()).toFixed(2)} />
               </CardContent>
             </Card>
           </div>
@@ -130,7 +196,7 @@ function DateRangePicker({ date, setDate, label }: { date: Date | undefined, set
               <Button
                 variant={"outline"}
                 className={cn(
-                  "w-[160px] justify-start text-left font-normal",
+                  "w-[228px] justify-start text-left font-normal",
                   !date && "text-muted-foreground"
                 )}
               >
@@ -138,21 +204,22 @@ function DateRangePicker({ date, setDate, label }: { date: Date | undefined, set
                 {date ? format(date, "PPP") : <span>{label}</span>}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-[288px] p-0" align="start">
               <Calendar
                 mode="single"
                 selected={date}
                 onSelect={setDate}
                 initialFocus
+                className="w-full"
               />
             </PopoverContent>
           </Popover>
     )
 }
 
-function StatCard({ title, value, trend }: { title: string, value: string | number, trend?: 'positive' | 'negative' | 'neutral' }) {
+function StatCard({ title, value, trend, source }: { title: string, value: string | number, trend?: 'positive' | 'negative' | 'neutral', source?: 'backend' | 'mock' }) {
   return (
-    <Card>
+    <Card className="relative">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
       </CardHeader>
@@ -164,6 +231,11 @@ function StatCard({ title, value, trend }: { title: string, value: string | numb
           {value}
         </div>
       </CardContent>
+      {source && (
+        <div className="absolute bottom-4 right-4">
+          <DataSourceBadge source={source} showLabel={false} />
+        </div>
+      )}
     </Card>
   );
 }
