@@ -24,7 +24,7 @@ async function sha256(str: string): Promise<string> {
   const buffer = new TextEncoder().encode(str);
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map(b => ('00' + b.toString(16)).slice(-2)).join('');
 }
 
 const formSchema = z.object({
@@ -85,13 +85,13 @@ export default function Login({ onLogin }: LoginProps) {
       // Step 1: In authenticate(), Dart does: SHA256(password)
       let firstHash = await sha256(values.password);
       console.log("[Login] Step 1 - SHA256(password):", firstHash);
-      
+      /*
       // Special hardcoded hash for drperez@curisec.com
       if (email.toLowerCase() === "drperez@curisec.com") {
         firstHash = "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f";
         console.log("[Login] SPECIAL: Using hardcoded hash for drperez@curisec.com");
       }
-      
+      */
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
       const salt = `${email}38457487${deviceId}`;
       const encountertrackid = await sha256(salt);
@@ -288,15 +288,53 @@ export default function Login({ onLogin }: LoginProps) {
     console.log("[Login] Starting user data loading...");
     
     try {
-      // Step 1: Get fresh facilities from server
-      const { getFacilities, getAuthInfo } = useAuth();
+      // Step 1: Load user data (EntityInfo + Groups) first - this populates userEntityId (ProviderId)
+      const { loadUser, getFacilities, getAuthInfo, setSelectedFacility, isFacilitySelected } = useAuth();
       
-      console.log("[Login] Fetching fresh facilities from server...");
+      console.log("[Login] Step 1: Loading user data (EntityInfo + Groups)...");
+      const loadUserSuccess = await loadUser(email);
+      
+      if (!loadUserSuccess) {
+        console.warn("[Login] Failed to load user data, but continuing with cached data");
+      } else {
+        console.log("[Login] User data loaded successfully");
+      }
+      
+      // Step 2: Get fresh facilities from server (now with ProviderId available)
+      console.log("[Login] Step 2: Fetching facilities from server...");
       const facilities = await getFacilities();
       console.log("[Login] Facilities loaded:", facilities.length, "facilities");
       
       // Get current auth info to update
       const authInfo = getAuthInfo();
+      
+      // Step 3: Check if user has only ONE facility
+      if (facilities.length === 1) {
+        console.log("[Login] Only one facility available, auto-selecting it...");
+        const singleFacility = facilities[0];
+        
+        // Auto-select the facility
+        setSelectedFacility(singleFacility.id);
+        
+        // Dispatch facility selected event
+        dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, singleFacility.id);
+        
+        // Show welcome message
+        const entityName = authInfo.entityName || email.split('@')[0] || "User";
+        toast({
+          title: `Welcome, ${entityName}!`,
+          description: `Automatically logged into ${singleFacility.name || singleFacility.id}`,
+        });
+        
+        // Call onLogin callback (which navigates to /facility/)
+        onLogin();
+        
+        console.log("[Login] Single facility auto-selected, navigating to dashboard...");
+        return;
+      }
+      
+      // Step 4: Multiple facilities - show selector
+      console.log("[Login] Multiple facilities available, user will select from FacilitySelectorPage");
       
       // Dispatch login event with complete information
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
@@ -305,11 +343,6 @@ export default function Login({ onLogin }: LoginProps) {
         facilitiesCount: facilities.length,
       });
       
-      // Set facility ID to 5 by default (bypass facility selector)
-      const { setSelectedFacility } = useAuth();
-      setSelectedFacility("5");
-      console.log("[Login] Auto-selected facilityId: 5 (bypassing selector)");
-      
       // Call onLogin callback
       onLogin();
       
@@ -317,7 +350,7 @@ export default function Login({ onLogin }: LoginProps) {
       const entityName = authInfo.entityName || email.split('@')[0] || "User";
       toast({
         title: `Welcome, ${entityName}!`,
-        description: `You have successfully logged in.`,
+        description: `You have successfully logged in. Please select a facility.`,
       });
       
     } catch (error) {

@@ -6,8 +6,19 @@ import { writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import rateLimit from "express-rate-limit";
 import mssql from 'mssql';
+import FormData from 'form-data';
+import https from 'https';
 
-const LOG_FILE = "/tmp/wounddatacenter-login.log";
+const LOG_FILE = process.env.LOG_FILE || "./server-login.log";
+
+// BACKEND_API_URL based on environment
+// Development: http://127.0.0.1 (local HTTP, no certificates)
+// Production: https://cubed-mr.app (or your production domain)
+const BACKEND_API_URL = process.env.BACKEND_API_URL || 
+  (process.env.NODE_ENV === 'production' 
+    ? "https://cubed-mr.app/get"  // Change to your production domain
+    : "http://127.0.0.1/get"      // Local development
+  );
 
 // ============= CUSTOM RATE LIMITING FOR LOGIN =============
 // Store failed login attempts by email (not IP, to allow different users from same IP)
@@ -85,14 +96,44 @@ const genericLimiter = rateLimit({
     });
   },
   skip: (req) => {
-    // Skip rate limiting for GET requests and TryLogin (handled separately)
-    return req.method === "GET" || req.body?.entity === "TryLogin" || req.body?.action === "TryLogin";
+    // Skip rate limiting for GET requests, TryLogin, and facility queries (legitimate operations)
+    return req.method === "GET" || 
+           req.body?.entity === "TryLogin" || 
+           req.body?.action === "TryLogin" ||
+           req.body?.entity === "FacilityDataCenter" ||
+           req.body?.entity === "Facility" ||
+           req.body?.entity === "FacilitiesByProvider";
   },
 });
 
 const fetchWithTimeout = (url: string, options: any, timeout: number = 5000) => {
+  // Configure HTTPS agent based on environment
+  let agent: https.Agent | undefined = undefined;
+  
+  if (url.startsWith('https')) {
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    
+    agent = new https.Agent({
+      rejectUnauthorized: !isDevelopment,  // False en desarrollo, True en producción
+      minVersion: 'TLSv1.2',
+    });
+    
+    if (isDevelopment) {
+      console.log('[fetchWithTimeout] Development mode: self-signed certificates accepted');
+    } else {
+      console.log('[fetchWithTimeout] Production mode: certificate validation enabled');
+    }
+  }
+  
+  const fetchOptions = {
+    ...options,
+    agent,
+  };
+  
+  console.log(`[fetchWithTimeout] URL: ${url}, environment: ${process.env.NODE_ENV || 'development'}`);
+  
   return Promise.race([
-    fetch(url, options),
+    fetch(url, fetchOptions),
     new Promise((_, reject) =>
       setTimeout(() => reject(new Error("Timeout")), timeout)
     ),
@@ -138,6 +179,52 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // prefix all routes with /api
+
+  // ============= DIAGNOSTIC ROUTES =============
+
+  app.get("/api/diagnose/backend-connectivity", async (req, res) => {
+    console.log("[/api/diagnose/backend-connectivity] Testing connectivity to backend");
+    
+    try {
+      const testUrl = BACKEND_API_URL;
+      console.log("[/api/diagnose/backend-connectivity] Testing URL:", testUrl);
+      
+      // Try to fetch with detailed error logging
+      const response = await fetchWithTimeout(
+        testUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity: "test", email: "test@test.com" })
+        },
+        3000
+      );
+      
+      console.log("[/api/diagnose/backend-connectivity] Response status:", response.status);
+      
+      const text = await response.text();
+      console.log("[/api/diagnose/backend-connectivity] Response text:", text.substring(0, 200));
+      
+      res.json({
+        status: true,
+        message: "Backend connectivity test successful",
+        url: testUrl,
+        httpStatus: response.status,
+        responseLength: text.length
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error("[/api/diagnose/backend-connectivity] Error:", err.message);
+      console.error("[/api/diagnose/backend-connectivity] Stack:", err.stack);
+      
+      res.status(500).json({
+        status: false,
+        error: err.message,
+        url: BACKEND_API_URL,
+        type: err.constructor.name
+      });
+    }
+  });
 
   // ============= AUTHENTICATION ROUTES =============
   
@@ -239,32 +326,43 @@ export async function registerRoutes(
       console.log("[/api/get] Remote payload keys:", Object.keys(remotePayload));
       console.log("[/api/get] About to send to backend - entity:", requestedEntity, "action in payload:", remotePayload.action, "id:", remotePayload.id);
 
+      // For facility data queries, add the same tracking parameters that Flutter uses
+      if (requestedEntity === "FacilityDataCenter" || requestedEntity === "Facility" || requestedEntity === "FacilitiesByProvider") {
+        // Add deviceId if not already present
+        if (!remotePayload.deviceId && deviceId) {
+          remotePayload.deviceId = deviceId;
+          console.log("[/api/get] Added deviceId from request:", deviceId);
+        }
+        
+        // Flutter adds encountertrackid (SHA256 hash of email + salt + deviceId)
+        if (remotePayload.email && (remotePayload.deviceId || deviceId)) {
+          const salt = remotePayload.email + "38457487" + (remotePayload.deviceId || deviceId);
+          const encountertrackid = createHash('sha256').update(salt).digest('hex');
+          remotePayload.encountertrackid = encountertrackid;
+          console.log("[/api/get] Added encountertrackid (SHA256 hash)");
+        }
+        
+        // Flutter adds providertrackid which is the authentication token
+        if (remotePayload.token && !remotePayload.providertrackid) {
+          remotePayload.providertrackid = remotePayload.token;
+          console.log("[/api/get] Added providertrackid (from token)");
+        }
+      }
+
       let body;
       let headers = {};
       
-      if (requestedEntity === "TryLogin" || requestedEntity === "EntityInfo" || requestedEntity === "GroupsByUser") {
-        // For login and user data operations, use JSON
+      if (requestedEntity === "TryLogin" || requestedEntity === "EntityInfo" || requestedEntity === "GroupsByUser" || requestedEntity === "FacilityDataCenter") {
+        // For login, user data, and facility list operations, use JSON
         body = JSON.stringify(remotePayload);
         headers = { "Content-Type": "application/json" };
-        console.log("[/api/get] Sending as JSON. Body:", body.substring(0, 200));
-      } else if (requestedEntity === "Facility" || requestedEntity === "FacilitiesByProvider") {
-        // For facility list operations, use FormData/multipart like Flutter does
-        // The remote API expects multipart/form-data, not URL-encoded
-        const FormData = require('form-data');
-        const formData = new FormData();
+        console.log("[/api/get] Sending as JSON. Body:", body.substring(0, 300));
+        console.log("[/api/get] JSON Payload fields:", Object.keys(remotePayload));
         for (const key in remotePayload) {
-          // Only append if value is not undefined and not null
-          if (remotePayload[key] !== undefined && remotePayload[key] !== null) {
-            formData.append(key, remotePayload[key]);
-          }
+          const value = remotePayload[key];
+          const displayValue = key === 'token' ? '***' + String(value).substring(String(value).length - 8) : value;
+          console.log(`  ${key}: ${displayValue}`);
         }
-        body = formData;
-        headers = {
-          ...formData.getHeaders(),
-          // Add authorization header with the token
-          ...(remotePayload.token && { "Authorization": `Bearer ${remotePayload.token}` }),
-        };
-        console.log("[/api/get] Sending as FormData (multipart) for Facility list with Authorization header");
       } else {
         // For other entities, use FormData
         const formData = new URLSearchParams();
@@ -279,8 +377,10 @@ export async function registerRoutes(
         console.log("[/api/get] Sending as FormData:", body);
       }
 
+      console.log("[/api/get] About to fetch from backend:", BACKEND_API_URL);
+      
       const remoteResponse = await fetchWithTimeout(
-        "https://cubed-mr.app/api/get",
+        BACKEND_API_URL,
         {
           method: "POST",
           headers: headers,
@@ -288,7 +388,24 @@ export async function registerRoutes(
         }
       );
 
-      console.log("[/api/get] Remote response status:", remoteResponse.status, "ok:", remoteResponse.ok);
+      console.log("\n" + "=".repeat(100));
+      console.log("[/api/get] ========== LLAMADA A API REMOTA ==========");
+      console.log("[/api/get] URL:", BACKEND_API_URL);
+      console.log("[/api/get] Método HTTP:", "POST");
+      console.log("[/api/get] Content-Type:", headers["Content-Type"]);
+      console.log("[/api/get] Token enviado:", remotePayload.token);
+      console.log("[/api/get] Email:", remotePayload.email);
+      console.log("[/api/get] Entity:", remotePayload.entity);
+      console.log("[/api/get] Method/Action:", remotePayload.method || remotePayload.action);
+      console.log("[/api/get] ID (providerId):", remotePayload.id);
+      console.log("[/api/get] DeviceId:", remotePayload.deviceId);
+      console.log("[/api/get] EncounterTrackId:", remotePayload.encountertrackid);
+      console.log("[/api/get] ProviderTrackId:", remotePayload.providertrackid);
+      console.log("[/api/get] Body completo enviado:");
+      console.log(body);
+      console.log("[/api/get] Respuesta status:", remoteResponse.status, "ok:", remoteResponse.ok);
+      console.log("[/api/get] ============================================");
+      console.log("=".repeat(100) + "\n");
 
       if (!remoteResponse.ok) {
         logLogin(`[/api/get] Backend returned status: ${remoteResponse.status}`);
@@ -301,7 +418,15 @@ export async function registerRoutes(
         logLogin(`[/api/get] Backend raw response (${responseText.length} bytes): ${responseText.substring(0, 200)}`);
         
         data = JSON.parse(responseText);
-        console.log("[/api/get] Parsed backend data:", JSON.stringify(data).substring(0, 300));
+        console.log("[/api/get] Parsed backend data:", JSON.stringify(data));
+        
+        // Log detailed error information if status is false
+        if (data.status === false) {
+          console.error("[/api/get] ❌ API Remote returned error:");
+          console.error("    status:", data.status);
+          console.error("    error:", data.error);
+          console.error("    Full response:", JSON.stringify(data, null, 2));
+        }
       } catch (e) {
         console.error("[/api/get] Failed to parse backend response:", e);
         logLogin(`[/api/get] Failed to parse backend response: ${e}`);
@@ -342,8 +467,13 @@ export async function registerRoutes(
       
       res.json(data);
     } catch (error) {
-      console.error("POST /api/get error:", error);
-      res.status(500).json({ status: false, error: "Server error" });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+      console.error("POST /api/get error:", errorMessage);
+      console.error("Error stack:", errorStack);
+      logLogin(`[/api/get] Error: ${errorMessage}`);
+      logLogin(`[/api/get] Stack: ${errorStack}`);
+      res.status(500).json({ status: false, error: "Server error", details: errorMessage });
     }
   });
 
@@ -358,7 +488,7 @@ export async function registerRoutes(
       };
 
       const remoteResponse = await fetchWithTimeout(
-        "https://cubed-mr.app/api/get",
+        BACKEND_API_URL,
         {
           method: "POST",
           headers: { 
@@ -374,7 +504,7 @@ export async function registerRoutes(
       if (data.error === "Unauthorized access" && req.headers.authorization) {
         const authHeaders = getAuthHeaders(req);
         const retryResponse = await fetchWithTimeout(
-          "https://cubed-mr.app/api/get",
+          BACKEND_API_URL,
           {
             method: "POST",
             headers: { 

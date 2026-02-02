@@ -460,7 +460,7 @@ export default function Dashboard() {
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold text-foreground tracking-tight">
-                {authInfo.entityName ? `${authInfo.entityName} Dashboard` : 'Facility Dashboard'}
+                Dashboard
               </h1>
               {authInfo.facilityId && (
                 <span className="text-xs font-semibold bg-primary/10 text-primary px-3 py-1.5 rounded-full">

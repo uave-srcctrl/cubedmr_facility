@@ -88,7 +88,7 @@ export default function ExcelImportPage() {
           setProgress(75);
 
           if (jsonData.length === 0) {
-            throw new Error('El archivo Excel está vacío');
+            throw new Error('The Excel file is empty');
           }
 
           // Convert to objects with headers
@@ -111,14 +111,14 @@ export default function ExcelImportPage() {
           if (!validation.isValid) {
             setImportResult({
               success: false,
-              message: `Archivo procesado pero con errores de validación. Revisa los detalles.`,
+              message: `File processed but with validation errors. Review the details.`,
               data: processedData,
               errors: validation.errors.slice(0, 10) // Show first 10 errors
             });
           } else {
             setImportResult({
               success: true,
-              message: `Archivo procesado exitosamente. ${processedData.length} filas encontradas y validadas.`,
+              message: `File processed successfully. ${processedData.length} rows found and validated.`,
               data: processedData
             });
           }
@@ -126,16 +126,16 @@ export default function ExcelImportPage() {
           setProgress(100);
 
           toast({
-            title: "Archivo procesado",
-            description: `${processedData.length} filas encontradas en el archivo.`,
+            title: "File processed",
+            description: `${processedData.length} rows found in the file.`,
           });
 
         } catch (error) {
           console.error('Error processing file:', error);
           setImportResult({
             success: false,
-            message: 'Error al procesar el archivo Excel.',
-            errors: [error instanceof Error ? error.message : 'Error desconocido']
+            message: 'Error processing the Excel file.',
+            errors: [error instanceof Error ? error.message : 'Unknown error']
           });
         }
       };
@@ -146,8 +146,8 @@ export default function ExcelImportPage() {
       console.error('Error reading file:', error);
       setImportResult({
         success: false,
-        message: 'Error al leer el archivo.',
-        errors: [error instanceof Error ? error.message : 'Error desconocido']
+        message: 'Error reading the file.',
+        errors: [error instanceof Error ? error.message : 'Unknown error']
       });
     } finally {
       setIsProcessing(false);
@@ -181,27 +181,27 @@ export default function ExcelImportPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Error al importar los datos');
+        throw new Error('Error importing data');
       }
 
       const result = await response.json();
 
       setImportResult({
         success: true,
-        message: `Datos importados exitosamente. ${result.insertedCount} registros procesados.`
+        message: `Data imported successfully. ${result.insertedCount} records processed.`
       });
 
       toast({
-        title: "Importación exitosa",
-        description: `${result.insertedCount} registros procesados.`,
+        title: "Import successful",
+        description: `${result.insertedCount} records processed.`,
       });
 
     } catch (error) {
       console.error('Import error:', error);
       setImportResult({
         success: false,
-        message: 'Error al importar los datos.',
-        errors: [error instanceof Error ? error.message : 'Error desconocido']
+        message: 'Error importing data.',
+        errors: [error instanceof Error ? error.message : 'Unknown error']
       });
     } finally {
       setIsProcessing(false);
@@ -219,8 +219,8 @@ export default function ExcelImportPage() {
   const downloadTemplate = () => {
     createSampleExcel();
     toast({
-      title: "Plantilla descargada",
-      description: "El archivo de plantilla se ha descargado.",
+      title: "Template downloaded",
+      description: "The template file has been downloaded.",
     });
   };
 
@@ -228,14 +228,14 @@ export default function ExcelImportPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Importar Datos Excel</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Import Excel Data</h1>
           <p className="text-muted-foreground">
-            Sube un archivo Excel para importar datos de heridas
+            Upload an Excel file to import wound data
           </p>
         </div>
         <Button onClick={downloadTemplate} variant="outline">
           <Download className="mr-2 h-4 w-4" />
-          Descargar Plantilla
+          Download Template
         </Button>
       </div>
 
@@ -244,7 +244,7 @@ export default function ExcelImportPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
-            Subir Archivo Excel
+            Upload Excel File
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -259,17 +259,17 @@ export default function ExcelImportPage() {
             <input {...getInputProps()} />
             <FileSpreadsheet className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
             {isDragActive ? (
-              <p className="text-lg font-medium">Suelta el archivo aquí...</p>
+              <p className="text-lg font-medium">Drop file here...</p>
             ) : (
               <div>
                 <p className="text-lg font-medium mb-2">
-                  Arrastra y suelta un archivo Excel aquí
+                  Drag and drop an Excel file here
                 </p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  O haz clic para seleccionar un archivo
+                  Or click to select a file
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Formatos soportados: .xlsx, .xls (máx. 10MB)
+                  Supported formats: .xlsx, .xls (max. 10MB)
                 </p>
               </div>
             )}
@@ -300,7 +300,7 @@ export default function ExcelImportPage() {
           <CardContent className="pt-6">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span>Procesando archivo...</span>
+                <span>Processing file...</span>
                 <span>{Math.round(progress)}%</span>
               </div>
               <Progress value={progress} className="w-full" />
@@ -313,7 +313,7 @@ export default function ExcelImportPage() {
       {previewData.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Vista Previa de Datos</CardTitle>
+            <CardTitle>Data Preview</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -341,7 +341,7 @@ export default function ExcelImportPage() {
               </table>
             </div>
             <p className="text-sm text-muted-foreground mt-4">
-              Mostrando las primeras 5 filas. Total: {importResult?.data?.length} filas.
+              Showing first 5 rows. Total: {importResult?.data?.length} rows.
             </p>
           </CardContent>
         </Card>
@@ -366,7 +366,7 @@ export default function ExcelImportPage() {
 
             {importResult.errors && importResult.errors.length > 0 && (
               <div className="mt-4">
-                <h4 className="font-medium text-red-800 mb-2">Errores encontrados:</h4>
+                <h4 className="font-medium text-red-800 mb-2">Errors found:</h4>
                 <ul className="list-disc list-inside text-sm text-red-700 space-y-1">
                   {importResult.errors.map((error, index) => (
                     <li key={index}>{error}</li>
@@ -378,10 +378,10 @@ export default function ExcelImportPage() {
             {importResult.success && importResult.data && (
               <div className="mt-4 flex gap-2">
                 <Button onClick={handleImport} disabled={isProcessing}>
-                  {isProcessing ? 'Importando...' : 'Importar Datos'}
+                  {isProcessing ? 'Importing...' : 'Import Data'}
                 </Button>
                 <Button variant="outline" onClick={clearFile}>
-                  Limpiar
+                  Clear
                 </Button>
               </div>
             )}
@@ -394,29 +394,29 @@ export default function ExcelImportPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5" />
-            Instrucciones de Importación
+            Import Instructions
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <h4 className="font-medium mb-2">Formato del Archivo Excel:</h4>
+            <h4 className="font-medium mb-2">Excel File Format:</h4>
             <ul className="list-disc list-inside text-sm space-y-1 text-muted-foreground">
-              <li>La primera fila debe contener los nombres de las columnas</li>
-              <li>Columnas requeridas: patient_id, facility_id, location, etiology, surface, push_score, progress, disposition, dos</li>
-              <li>Formato de fecha: YYYY-MM-DD (ej: 2025-01-15)</li>
-              <li>Valores numéricos: surface y push_score deben ser números</li>
+              <li>The first row must contain column names</li>
+              <li>Required columns: patient_id, facility_id, location, etiology, surface, push_score, progress, disposition, dos</li>
+              <li>Date format: YYYY-MM-DD (e.g.: 2025-01-15)</li>
+              <li>Numeric values: surface and push_score must be numbers</li>
             </ul>
           </div>
 
           <div>
-            <h4 className="font-medium mb-2">Validaciones:</h4>
+            <h4 className="font-medium mb-2">Validations:</h4>
             <ul className="list-disc list-inside text-sm space-y-1 text-muted-foreground">
-              <li>patient_id no puede estar vacío</li>
-              <li>facility_id debe ser un número válido</li>
-              <li>surface debe ser un número positivo</li>
-              <li>push_score debe estar entre 0 y 17</li>
-              <li>progress debe ser: Improving, Deteriorating, Stable</li>
-              <li>disposition debe ser: Active, Resolved, New</li>
+              <li>patient_id cannot be empty</li>
+              <li>facility_id must be a valid number</li>
+              <li>surface must be a positive number</li>
+              <li>push_score must be between 0 and 17</li>
+              <li>progress must be: Improving, Deteriorating, Stable</li>
+              <li>disposition must be: Active, Resolved, New</li>
             </ul>
           </div>
         </CardContent>

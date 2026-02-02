@@ -116,8 +116,6 @@ export default function AcuityReport() {
             activeWounds: data.activeWounds || data.ActiveWounds || data.wounds || 0,
             activePatients: data.activePatients || data.ActivePatients || data.patients || 0
         };
-
-        };
         
         // If the single object has a 'trend' or 'history' field
         if (Array.isArray(data.trend)) {

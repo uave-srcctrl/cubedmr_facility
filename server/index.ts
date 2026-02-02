@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import helmet from "helmet";
 import multer from "multer";
+import httpProxy from "http-proxy";
 
 const app = express();
 const httpServer = createServer(app);
@@ -57,6 +58,24 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Create HTTP proxy for Apache backend
+const proxy = httpProxy.createProxyServer({
+  target: 'http://localhost:80',
+  changeOrigin: true,
+  timeout: 30000,
+});
+
+// Proxy requests to localhost:8080 -> Apache on localhost:80
+app.use('/api/get', (req, res) => {
+  console.log(`[Proxy] Forwarding to Apache: ${req.method} /api/get`);
+  proxy.web(req, res, (err) => {
+    if (err) {
+      console.error('[Proxy] Error:', err.message);
+      res.status(502).json({ status: false, error: 'Gateway error', details: err.message });
+    }
+  });
+});
 
 // Middleware para manejar rutas de API con y sin prefijo /facility
 // Esto permite que Apache pueda enviar /facility/api/... y el servidor lo entienda como /api/...
@@ -134,14 +153,14 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
+  const host = process.env.HOST || "127.0.0.1";
   httpServer.listen(
     {
       port,
-      host: "0.0.0.0",
-      reusePort: true,
+      host,
     },
     () => {
-      log(`serving on port ${port}`);
+      log(`serving on ${host}:${port}`);
     },
   );
 })();

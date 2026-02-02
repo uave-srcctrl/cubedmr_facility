@@ -13,6 +13,9 @@ import OutcomeReportGlobal from "@/pages/outcome-report";
 import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
 import ExcelImportPage from "@/pages/excel-import";
+import DataImportPage from "@/pages/data-import";
+import SettingsPage from "@/pages/settings";
+import PatientsPage from "@/pages/patients";
 import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useLogoutOnUnload } from "@/hooks/use-logout-on-unload";
@@ -81,11 +84,14 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
       <Switch>
         {console.log('[Router/Switch] Inside Switch, location should be /facility/')}
         <Route path="/facility/" component={Dashboard} />
+        <Route path="/facility/patients" component={PatientsPage} />
         <Route path="/facility/facility-report" component={FacilityWoundReport} />
         <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
         <Route path="/facility/etiology-report" component={EtiologyReport} />
         <Route path="/facility/acuity-report" component={AcuityReport} />
         <Route path="/facility/excel-import" component={ExcelImportPage} />
+        <Route path="/facility/data-import" component={DataImportPage} />
+        <Route path="/facility/settings" component={SettingsPage} />
         <Route path="/facility-selector" component={FacilitySelectorPage} />
         <Route component={NotFound} />
       </Switch>
@@ -199,6 +205,12 @@ function App() {
       updateAuthState();
     });
 
+    const unsubscribeFacilityChanged = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (facilityId) => {
+      console.log("[App] FACILITY_CHANGED event received - facilityId:", facilityId);
+      // Force a re-render to update facilitySelected state in Router
+      updateAuthState();
+    });
+
     // Also listen for storage changes (for other tabs)
     const handleStorageChange = () => {
       console.log("[App] Storage event fired - checking if auth changed");
@@ -212,6 +224,7 @@ function App() {
     return () => {
       unsubscribeLogin();
       unsubscribeLogout();
+      unsubscribeFacilityChanged();
       window.removeEventListener("storage", handleStorageChange);
     };
   }, []);

@@ -284,10 +284,20 @@ export function useAuth() {
       }
 
       const entityInfoData = await entityInfoResponse.json();
+      console.log('[useAuth] ================================================================================');
       console.log('[useAuth] EntityInfo response:', entityInfoData);
+      console.log('[useAuth] All EntityInfo data fields:', Object.keys(entityInfoData?.data?.[0] || {}));
+      console.log('[useAuth] ================================================================================');
 
       if (entityInfoData.data && entityInfoData.data[0]) {
         const userData = entityInfoData.data[0];
+        console.log('[useAuth] Processing EntityInfo data:');
+        console.log('  entity:', userData.entity);
+        console.log('  ProviderId:', userData.ProviderId, '(type:', typeof userData.ProviderId + ')');
+        console.log('  ProviderName:', userData.ProviderName);
+        console.log('  NurseId:', userData.NurseId);
+        console.log('  NurseName:', userData.NurseName);
+        console.log('  email:', userData.email);
 
         // Update user info in localStorage
         if (userData.email) localStorage.setItem("userEmail", userData.email);
@@ -306,14 +316,13 @@ export function useAuth() {
           console.log('[useAuth] Stored Nurse name:', userData.NurseName);
         }
 
-        // Set entityId based on entity type - only set if value exists and is not undefined/null
-        if (userData.entity === 'Provider' && userData.ProviderId) {
-          localStorage.setItem("userEntityId", userData.ProviderId.toString());
-        } else if (userData.entity === 'Nurse' && userData.NurseId) {
-          localStorage.setItem("userEntityId", userData.NurseId.toString());
-        } else {
-          // Clear entityId if it doesn't match any valid entity type
-          localStorage.removeItem("userEntityId");
+        // NOTE: entityId will be set after GroupsByUser is loaded, since userData.entity might be undefined
+        // Store both ProviderId and NurseId for later use (will set entityId based on user groups)
+        if (userData.ProviderId) {
+          localStorage.setItem("tempProviderId", userData.ProviderId.toString());
+        }
+        if (userData.NurseId) {
+          localStorage.setItem("tempNurseId", userData.NurseId.toString());
         }
       }
 
@@ -354,6 +363,33 @@ export function useAuth() {
 
         localStorage.setItem("userGroups", JSON.stringify(userGroups));
         console.log('[useAuth] User groups set:', userGroups);
+
+        // NOW set entityId based on user groups (not userData.entity which might be undefined)
+        console.log('[useAuth] Setting entityId based on user groups:');
+        if (userGroups.includes('Provider')) {
+          const tempProviderId = localStorage.getItem("tempProviderId");
+          if (tempProviderId) {
+            console.log('[useAuth] ✅ Setting userEntityId to ProviderId:', tempProviderId);
+            localStorage.setItem("userEntityId", tempProviderId);
+          } else {
+            console.log('[useAuth] ⚠️ User is Provider but ProviderId not available');
+          }
+        } else if (userGroups.includes('Nurse')) {
+          const tempNurseId = localStorage.getItem("tempNurseId");
+          if (tempNurseId) {
+            console.log('[useAuth] ✅ Setting userEntityId to NurseId:', tempNurseId);
+            localStorage.setItem("userEntityId", tempNurseId);
+          } else {
+            console.log('[useAuth] ⚠️ User is Nurse but NurseId not available');
+          }
+        } else {
+          console.log('[useAuth] ❌ User is neither Provider nor Nurse, clearing entityId');
+          localStorage.removeItem("userEntityId");
+        }
+
+        // Clean up temp variables
+        localStorage.removeItem("tempProviderId");
+        localStorage.removeItem("tempNurseId");
       }
 
       console.log('[useAuth] loadUser completed successfully');
@@ -366,13 +402,20 @@ export function useAuth() {
 
   async function getFacilities(): Promise<Facility[]> {
     try {
-      console.log('[useAuth] getFacilities called');
+      console.log("\n" + "=".repeat(80));
+      console.log("[useAuth] 🚀 getFacilities() INICIADO");
+      console.log("=".repeat(80));
+      console.log("Timestamp:", new Date().toISOString());
 
       const token = getToken();
       const email = getEmail();
 
+      console.log("\n[useAuth] 🔑 Autenticación:");
+      console.log("  Email:", email);
+      console.log("  Token:", token ? "✅ Presente (" + token.substring(0, 10) + "...)" : "❌ Falta");
+
       if (!token || !email) {
-        console.error('[useAuth] No token or email available');
+        console.error("[useAuth] ❌ FALLO: No hay token o email disponible");
         return [];
       }
 
@@ -383,86 +426,48 @@ export function useAuth() {
         localStorage.setItem("deviceId", deviceId);
       }
       
-      // Clean up deviceId if it has extra quotes
-      deviceId = deviceId.replace(/^["']|["']$/g, '');
-
-      // Generate encountertrackid
-      const salt = `${email}38457487${deviceId}`;
-      const encountertrackid = await sha256(salt);
-
-      // Prepare parameters for getting facilities
-      // For providers, use FacilitiesByProvider; for others use Facility with lst action
-      const userGroups = getUserGroups();
-      const entityId = localStorage.getItem("userEntityId");
-      
-      let entity = "Facility";
-      const params: any = {};
-
-      // Determine which entity to use based on user role
-      if (userGroups.includes('Provider') && entityId && entityId !== "undefined" && entityId !== "null") {
-        // Use FacilitiesByProvider for providers
-        entity = "FacilitiesByProvider";
-        params.providerId = entityId;
-        params.id = entityId;  // Also include id parameter for API compatibility
-        console.log('[useAuth] Using FacilitiesByProvider with providerId:', entityId);
-      } else if (userGroups.includes('Nurse') && entityId && entityId !== "undefined" && entityId !== "null") {
-        // For nurses, use regular Facility with lst action
-        entity = "Facility";
-        params.action = "lst";
-        params.nurseId = entityId;
-        params.id = entityId;  // Also include id parameter for API compatibility
-        console.log('[useAuth] Using Facility lst for nurse');
-      } else {
-        // Default: use Facility with lst action
-        entity = "Facility";
-        params.action = "lst";
-        params.id = entityId || email;  // Use entityId if available, otherwise use email as fallback
-        console.log('[useAuth] Using Facility lst (default) with id:', params.id);
-      }
-
-      params.entity = entity;
-
-      // Always include tenantId if available
-      const currentTenant = getCurrentTenant();
-      if (currentTenant) {
-        params.tenantId = currentTenant;
-      }
-
       // Clean up token if it has extra quotes
       const cleanToken = token.replace(/^["']|["']$/g, '');
 
-      // Build request payload
-      // Include token for authorization with Express server
+      // Get provider ID if user is a provider
+      const userGroups = getUserGroups();
+      const entityId = localStorage.getItem("userEntityId");
+      
+      let providerId: string | undefined;
+      let practiceId: string | undefined;
+
+      // Determine provider/practice IDs based on user role
+      if (userGroups.includes('Provider') && entityId && entityId !== "undefined" && entityId !== "null") {
+        providerId = entityId;
+        console.log("[useAuth] 👤 Usuario es Provider con ID:", providerId);
+      }
+
+      // Build request payload using FacilityDataCenter entity structure
       const requestPayload: any = {
-        entity,
+        entity: "FacilityDataCenter",
+        method: "lstFacilitiesByWounds",  // Correct method for FacilityDataCenter entity
         token: cleanToken,
         email,
-        deviceId,
-        encountertrackid,
+        deviceId, // Include deviceId so server can calculate encountertrackid
       };
       
       // Add optional parameters
-      if (params.action) requestPayload.action = params.action;
-      if (params.id) requestPayload.id = params.id;
-      if (params.providerId) requestPayload.providerId = params.providerId;
-      if (params.nurseId) requestPayload.nurseId = params.nurseId;
-      if (params.tenantId) requestPayload.tenantId = params.tenantId;
+      if (practiceId) requestPayload.practiceId = practiceId;
+      // Note: FacilityDataCenter doesn't require providerId/id - it returns all facilities for the user
 
-      console.log('[useAuth] getFacilities payload:', {
-        entity,
-        action: params.action,
-        providerId: params.providerId,
-        nurseId: params.nurseId,
-        email,
-        deviceId,
-        encountertrackid,
-        token: cleanToken ? '***' : 'missing',
-        id: params.id,
-        note: 'Sending as FormData (URL-encoded) like Flutter'
-      });
+      console.log("\n[useAuth] 📤 Payload de Petición:");
+      console.log("  URL:", LOCAL_API.FACILITIES_LIST);
+      console.log("  Entity:", requestPayload.entity);
+      console.log("  Method:", requestPayload.method);
+      console.log("  Email:", requestPayload.email);
+      console.log("  ProviderId:", requestPayload.providerId || "(no especificado)");
+      console.log("  PracticeId:", requestPayload.practiceId || "(no especificado)");
+      console.log("  Token:", "***" + cleanToken.substring(cleanToken.length - 8));
 
-      // Send as JSON (matching the pattern from EntityInfo and GroupsByUser endpoints)
-      // Use JSON instead of FormData for consistency and better multer parsing
+      // Send as JSON to Express server
+      const startTime = performance.now();
+      console.log("\n[useAuth] ⏱️  Enviando petición al servidor...");
+      
       const response = await fetch(LOCAL_API.FACILITIES_LIST, {
         method: "POST",
         headers: {
@@ -471,10 +476,16 @@ export function useAuth() {
         body: JSON.stringify(requestPayload),
       });
 
+      const endTime = performance.now();
+      const duration = (endTime - startTime).toFixed(2);
+      
+      console.log("[useAuth] ⏱️  Respuesta recibida en:", duration, "ms");
+      console.log("[useAuth] HTTP Status:", response.status, response.statusText);
+
       if (!response.ok) {
-        console.error('[useAuth] Facilities request failed:', response.status);
+        console.error("[useAuth] ❌ La petición falló con status:", response.status);
         const errorText = await response.text();
-        console.error('[useAuth] Error response body:', errorText);
+        console.error("[useAuth] Cuerpo del error:", errorText);
         return [];
       }
 
@@ -483,13 +494,18 @@ export function useAuth() {
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error('[useAuth] Failed to parse response as JSON:', parseError);
+        console.error("[useAuth] ❌ Fallo al parsear JSON:", parseError);
         return [];
       }
 
-      console.log('[useAuth] Facilities response:', data);
+      console.log("\n[useAuth] 📥 Respuesta Completa del Servidor:");
+      console.log("  Status:", data.status);
+      console.log("  Has data?", data.data ? "✅ Sí" : "❌ No");
 
       if (data.data && Array.isArray(data.data)) {
+        console.log("\n[useAuth] 📊 Datos Recibidos:");
+        console.log("  Total items:", data.data.length);
+        
         const facilities: Facility[] = data.data.map((item: any) => ({
           id: item.id?.toString() || '',
           name: item.name || '',
@@ -509,23 +525,48 @@ export function useAuth() {
           statusRecord: item.statusRecord || 'A',
           createdAt: item.createdAt || '',
           updatedAt: item.updatedAt || '',
-          timezone: item.timezone || 'UTC'
+          timezone: item.timezone || 'UTC',
+          
+          // Campos de heridas (si están disponibles)
+          total_wound_encounters: item.total_wound_encounters,
+          active_wounds: item.active_wounds,
+          average_push_score: item.average_push_score,
+          acuity_level: item.acuity_level
         }));
 
-        console.log('[useAuth] getFacilities mapped facilities array:', facilities);
-        console.log('[useAuth] Facilities list - Total:', facilities.length, 'facilities');
-        facilities.forEach((f, i) => console.log(`  [${i}] ${f.name} (${f.id})`));
+        console.log("\n[useAuth] 📋 Detalles completos de cada facility:");
+        facilities.forEach((f, i) => {
+          console.log(`\n  [Facility ${i + 1}] ${f.name || f.id}`);
+          console.log(`    ID: ${f.id}`);
+          console.log(`    Todos los campos:`, JSON.stringify(f, null, 4));
+          if (f.total_wound_encounters !== undefined || f.active_wounds !== undefined) {
+            console.log(`    └─ 🩹 Heridas: ${f.active_wounds || 0} activas / ${f.total_wound_encounters || 0} total | PUSH: ${f.average_push_score || 'N/A'} | Riesgo: ${f.acuity_level || 'N/A'}`);
+          }
+        });
 
         // Store facilities in localStorage
         setAvailableFacilities(facilities);
-        console.log('[useAuth] Facilities stored:', facilities.length, 'facilities');
+        
+        console.log("\n[useAuth] 💾 Estado:");
+        console.log("  ✅ Facilities guardadas en localStorage");
+        console.log("  ✅ Total facilities:", facilities.length);
+        
+        console.log("\n" + "=".repeat(80));
+        console.log("[useAuth] ✅ getFacilities() COMPLETADO EXITOSAMENTE");
+        console.log("=".repeat(80) + "\n");
 
         return facilities;
       }
 
+      console.log("\n[useAuth] ⚠️  ADVERTENCIA: No se encontró array 'data' en la respuesta");
+      console.log("[useAuth] Respuesta completa:", data);
       return [];
     } catch (error) {
-      console.error('[useAuth] getFacilities error:', error);
+      console.error("\n[useAuth] ❌ ERROR en getFacilities():");
+      console.error("  Message:", (error as Error).message);
+      console.error("  Stack:", (error as Error).stack);
+      console.error("  Full Error:", error);
+      console.log("=".repeat(80) + "\n");
       return [];
     }
   }

@@ -13,7 +13,13 @@ import {
   Building2,
   Check,
   ChevronDown,
-  Upload
+  Upload,
+  FileSpreadsheet,
+  FileJson,
+  FileCode,
+  File,
+  Settings,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,6 +32,11 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/use-auth";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 
@@ -83,11 +94,17 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
 
   const navigation = [
     { name: "Dashboard", href: "/facility/", icon: LayoutDashboard },
+    { name: "Patients", href: "/facility/patients", icon: Users },
+    { name: "Woundcare Round Summary", href: "/facility/round-summary", icon: FileText },
     { name: "Facility Wound Report", href: "/facility/facility-report", icon: FileText },
     { name: "Outcome Report Global", href: "/facility/outcome-report", icon: Activity },
     { name: "Wound Etiology", href: "/facility/etiology-report", icon: PieChart },
     { name: "Acuity Index", href: "/facility/acuity-report", icon: Stethoscope },
-    { name: "Import Excel", href: "/facility/excel-import", icon: Upload },
+  ];
+
+  const importOptions = [
+    { name: "Data Import Hub", href: "/facility/data-import", icon: Upload, description: "Import multiple formats" },
+    { name: "Excel Import", href: "/facility/excel-import", icon: FileSpreadsheet, description: "XLSX, XLS files" },
   ];
 
   const SidebarContent = () => (
@@ -134,23 +151,23 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
                 </div>
               ) : (
                 facilities.map((facility: any) => (
-                  <DropdownMenuItem
-                    key={facility.id}
-                    onClick={() => handleChangeFacility(facility.id)}
-                    className={cn(
-                      "cursor-pointer gap-2",
-                      selectedFacilityId === facility.id && "bg-primary/10"
-                    )}
-                  >
-                    <div className="flex items-center justify-between w-full gap-2">
-                      <div className="flex items-center gap-2 flex-1">
-                        <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <div className="flex-1 truncate">
-                          <div className="font-medium text-sm truncate">
-                            {facility.name}
-                          </div>
-                          {facility.activePatients !== undefined && (
-                            <div className="text-xs text-muted-foreground">
+                    <DropdownMenuItem
+                      key={facility.id}
+                      onClick={() => handleChangeFacility(facility.id)}
+                      className={cn(
+                        "cursor-pointer gap-2",
+                        selectedFacilityId === facility.id && "bg-primary/10"
+                      )}
+                    >
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <div className="flex items-center gap-2 flex-1">
+                          <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <div className="flex-1 truncate">
+                            <div className="font-medium text-sm truncate">
+                              {facility.name}
+                            </div>
+                            {facility.activePatients !== undefined && (
+                              <div className="text-xs text-muted-foreground">
                               {facility.activePatients} active
                             </div>
                           )}
@@ -196,10 +213,79 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
               </Link>
             );
           })}
+
+          {/* Import Section */}
+          <div className="pt-4">
+            <Collapsible defaultOpen={location?.startsWith('/facility/') && (location?.includes('import') || location?.includes('data'))}>
+              <CollapsibleTrigger asChild>
+                <button
+                  className={cn(
+                    "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer w-full justify-between",
+                    (location?.includes('import') || location?.includes('data'))
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <Upload
+                      className={cn(
+                        "h-5 w-5 flex-shrink-0 transition-colors",
+                        (location?.includes('import') || location?.includes('data')) ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                      )}
+                    />
+                    <span>Data Import</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]:rotate-180" />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-1 space-y-1 pl-2">
+                {importOptions.map((option) => {
+                  const isActive = location === option.href;
+                  return (
+                    <Link key={option.name} href={option.href}>
+                      <div
+                        className={cn(
+                          "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors cursor-pointer",
+                          isActive
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+                        )}
+                      >
+                        <option.icon className="h-4 w-4 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate">{option.name}</p>
+                          <p className="text-xs text-muted-foreground/70 truncate">{option.description}</p>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
         </nav>
       </div>
-      <div className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3 px-2 mb-4">
+      <div className="border-t border-sidebar-border p-4 space-y-2">
+        <Link href="/facility/settings">
+          <div
+            className={cn(
+              "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer",
+              location === "/facility/settings"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+            )}
+          >
+            <Settings
+              className={cn(
+                "h-5 w-5 flex-shrink-0 transition-colors",
+                location === "/facility/settings" ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+              )}
+            />
+            Settings
+          </div>
+        </Link>
+        
+        <div className="flex items-center gap-3 px-2 py-2 border-t border-sidebar-border/50 mt-2 pt-4">
           <Avatar className="h-9 w-9 border border-sidebar-border">
             <AvatarFallback>{user?.name?.charAt(0) || "D"}</AvatarFallback>
           </Avatar>
