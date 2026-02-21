@@ -319,10 +319,10 @@ export default function Login({ onLogin }: LoginProps) {
         // Dispatch facility selected event
         dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, singleFacility.id);
         
-        // Show welcome message
-        const entityName = authInfo.entityName || email.split('@')[0] || "User";
+        // Show welcome message - use userName (ProviderName/NurseName) instead of entityName (entity type)
+        const displayName = authInfo.userName || authInfo.entityName || email.split('@')[0] || "User";
         toast({
-          title: `Welcome, ${entityName}!`,
+          title: `Welcome, ${displayName}!`,
           description: `Automatically logged into ${singleFacility.name || singleFacility.id}`,
         });
         
@@ -346,10 +346,10 @@ export default function Login({ onLogin }: LoginProps) {
       // Call onLogin callback
       onLogin();
       
-      // Show welcome message
-      const entityName = authInfo.entityName || email.split('@')[0] || "User";
+      // Show welcome message - use userName (ProviderName/NurseName) instead of entityName (entity type)
+      const displayName = authInfo.userName || authInfo.entityName || email.split('@')[0] || "User";
       toast({
-        title: `Welcome, ${entityName}!`,
+        title: `Welcome, ${displayName}!`,
         description: `You have successfully logged in. Please select a facility.`,
       });
       

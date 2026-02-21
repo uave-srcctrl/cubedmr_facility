@@ -15,18 +15,19 @@ const IS_REMOTE = ENVIRONMENT === 'remote';
 // API BASE URLS
 // ==========================================
 
-// Local API (Development) - Docker MSSQL + Local Express server
-// Uses relative path /facility/api which gets proxied to localhost:5000
-const LOCAL_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-const LOCAL_API_BASE = '/facility/api';
+// Local API (Development) - Direct to api.local (PHP backend)
+const LOCAL_API_BASE = 'http://api.local/api';
+
+// Local Express server (for auth endpoints)
+const LOCAL_EXPRESS_BASE = '/api';
 
 // Remote API (Production) - External cubed-mr.app server
 const REMOTE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL_REMOTE || 'https://cubed-mr.app';
 const REMOTE_API_BASE = '/api';
 
 // Select active backend based on environment
-const ACTIVE_BACKEND_URL = IS_LOCAL ? LOCAL_BACKEND_URL : REMOTE_BACKEND_URL;
-const ACTIVE_API_BASE = IS_LOCAL ? LOCAL_API_BASE : REMOTE_API_BASE;
+const ACTIVE_BACKEND_URL = IS_LOCAL ? 'http://api.local' : REMOTE_BACKEND_URL;
+const ACTIVE_API_BASE = IS_LOCAL ? '/api' : REMOTE_API_BASE;
 
 // Debug flag
 const DEBUG_API = import.meta.env.VITE_DEBUG_API === 'true';
@@ -34,46 +35,49 @@ const DEBUG_API = import.meta.env.VITE_DEBUG_API === 'true';
 // Log environment info
 if (DEBUG_API) {
   console.log('[API Config] Environment:', ENVIRONMENT);
-  console.log('[API Config] Using backend:', ACTIVE_BACKEND_URL);
   console.log('[API Config] API base path:', ACTIVE_API_BASE);
 }
 
 /**
- * Local API Endpoints (Docker MSSQL + Express on localhost:5000)
+ * Local API Endpoints - Direct to api.local (PHP backend)
  */
 export const LOCAL_API = {
-  // Authentication
-  LOGIN: `${LOCAL_API_BASE}/get`,
-  LOGOUT: `${LOCAL_API_BASE}/logout`,
-  HEALTH: `${LOCAL_API_BASE}/health`,
+  // Authentication - Uses Express server (localhost:5000)
+  LOGIN: `${LOCAL_EXPRESS_BASE}/get`,
+  LOGOUT: `${LOCAL_EXPRESS_BASE}/logout`,
+  HEALTH: `${LOCAL_EXPRESS_BASE}/health`,
   
-  // User/Facility
-  USER_PROFILE: `${LOCAL_API_BASE}/user/profile`,
-  FACILITY_METADATA: `${LOCAL_API_BASE}/facility/metadata`,
+  // User/Facility - Uses Express server
+  USER_PROFILE: `${LOCAL_EXPRESS_BASE}/user/profile`,
+  FACILITY_METADATA: `${LOCAL_EXPRESS_BASE}/facility/metadata`,
   
-  // Flutter-like endpoints for user data and facilities (all use /api/get)
-  ENTITY_INFO: `${LOCAL_API_BASE}/get`, // For EntityInfo entity
-  GROUPS_BY_USER: `${LOCAL_API_BASE}/get`, // For GroupsByUser entity
-  FACILITIES_LIST: `${LOCAL_API_BASE}/get`, // For Facility entity list
+  // Flutter-like endpoints for user data and facilities - Uses Express server
+  ENTITY_INFO: `${LOCAL_EXPRESS_BASE}/get`,
+  GROUPS_BY_USER: `${LOCAL_EXPRESS_BASE}/get`,
+  FACILITIES_LIST: `${LOCAL_EXPRESS_BASE}/get`,
   
-  // Reports (new endpoint for handling report requests)
-  REPORT: `${LOCAL_API_BASE}/report`,
+  // Reports - Uses Express server (generic report handler via proxy to local backend)
+  REPORT: `${LOCAL_EXPRESS_BASE}/report`,
   
-  // Facility Wound Report
-  FACILITY_WOUND_REPORT: `${LOCAL_API_BASE}/facility-wound-report`,
+  // Facility Wound Report - Uses Express server (routes to Slim app via local backend)
+  FACILITY_WOUND_REPORT: `${LOCAL_EXPRESS_BASE}/facility-wound-report`,
   
-  // Facility Acuity Index
-  FACILITY_ACUITY_INDEX: `${LOCAL_API_BASE}/facility-acuity-index`,
+  // Facility Acuity Index - Uses Express server (routes to Slim app)
+  FACILITY_ACUITY_INDEX: `${LOCAL_EXPRESS_BASE}/facility-acuity-index`,
   
-  // Etiology Distribution
-  ETIOLOGY_DISTRIBUTION: `${LOCAL_API_BASE}/etiology-distribution`,
+  // Etiology Distribution - Uses Express server (routes to Slim app)
+  ETIOLOGY_DISTRIBUTION: `${LOCAL_EXPRESS_BASE}/etiology-distribution`,
   
-  // Dashboard
-  DASHBOARD_KPIS: `${LOCAL_API_BASE}/dashboard/kpis`,
-  DASHBOARD_WOUND_ETIOLOGY: `${LOCAL_API_BASE}/dashboard/wound-etiology`,
-  DASHBOARD_WOUND_REDUCTION: `${LOCAL_API_BASE}/dashboard/wound-reduction`,
-  DASHBOARD_HEALING_STATUS: `${LOCAL_API_BASE}/dashboard/healing-status`,
-  DASHBOARD_WOUNDS_BY_STATUS: `${LOCAL_API_BASE}/dashboard/wounds-by-status`,
+  // Dashboard - Uses Express server (which proxies to local backend for local dev)
+  DASHBOARD_KPIS: `${LOCAL_EXPRESS_BASE}/dashboard/kpis`,
+  DASHBOARD_WOUND_ETIOLOGY: `${LOCAL_EXPRESS_BASE}/dashboard/wound-etiology`,
+  DASHBOARD_WOUND_REDUCTION: `${LOCAL_EXPRESS_BASE}/dashboard/wound-reduction`,
+  DASHBOARD_WOUND_REDUCTION_MEDIAN: `${LOCAL_EXPRESS_BASE}/dashboard/wound-reduction-median`,
+  DASHBOARD_HEALING_STATUS: `${LOCAL_EXPRESS_BASE}/dashboard/healing-status`,
+  DASHBOARD_WOUNDS_BY_STATUS: `${LOCAL_EXPRESS_BASE}/dashboard/wounds-by-status`,
+  
+  // Import Audit - Uses Express server (routes to PHP backend)
+  IMPORT_AUDIT: `${LOCAL_EXPRESS_BASE}/import-audit`,
 } as const;
 
 /**

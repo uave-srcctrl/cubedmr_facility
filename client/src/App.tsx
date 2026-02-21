@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import React, { useState, useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -12,6 +12,7 @@ import FacilityWoundReport from "@/pages/facility-wound-report";
 import OutcomeReportGlobal from "@/pages/outcome-report";
 import EtiologyReport from "@/pages/etiology-report";
 import AcuityReport from "@/pages/acuity-report";
+import RoundSummary from "@/pages/round-summary";
 import ExcelImportPage from "@/pages/excel-import";
 import DataImportPage from "@/pages/data-import";
 import SettingsPage from "@/pages/settings";
@@ -59,9 +60,14 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 
 function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean; user: any; onLogout: () => void }) {
   const { isFacilitySelected } = useAuth();
+  const [location] = useLocation();
   const facilitySelected = isFacilitySelected();
 
-  console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected);
+  // Routes that can be accessed without facility selection
+  const allowedWithoutFacility = ['/facility/data-import'];
+  const isAllowedRoute = allowedWithoutFacility.some(route => location === route);
+
+  console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected, 'location:', location, 'isAllowedRoute:', isAllowedRoute);
   
   if (!isAuthenticated) {
     console.log('[Router] NOT authenticated - showing Login component');
@@ -73,9 +79,20 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
   }
 
   // Si autenticado pero SIN facility seleccionada, mostrar selector
-  if (!facilitySelected) {
+  // EXCEPTO si estamos en una ruta permitida sin facility
+  if (!facilitySelected && !isAllowedRoute) {
     console.log('[Router] Authenticated but no facility selected - showing FacilitySelectorPage');
     return <FacilitySelectorPage />;
+  }
+
+  // If on data-import without facility, render it directly without Layout
+  if (!facilitySelected && isAllowedRoute) {
+    console.log('[Router] Authenticated, no facility, but on allowed route - showing DataImportPage');
+    return (
+      <div className="min-h-screen bg-background py-6 px-[10%]">
+        <DataImportPage />
+      </div>
+    );
   }
 
   console.log('[Router] AUTHENTICATED - showing Dashboard in Layout');
@@ -89,6 +106,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
         <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
         <Route path="/facility/etiology-report" component={EtiologyReport} />
         <Route path="/facility/acuity-report" component={AcuityReport} />
+        <Route path="/facility/round-summary" component={RoundSummary} />
         <Route path="/facility/excel-import" component={ExcelImportPage} />
         <Route path="/facility/data-import" component={DataImportPage} />
         <Route path="/facility/settings" component={SettingsPage} />

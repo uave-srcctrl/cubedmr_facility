@@ -93,6 +93,14 @@ export function useAuth() {
     dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, facilityId);
   }
 
+  function clearSelectedFacility(): void {
+    if (typeof window === "undefined") return;
+    localStorage.removeItem("selectedFacilityId");
+    
+    // Dispatch evento para que componentes se actualicen
+    dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, null);
+  }
+
   function getSelectedFacilityInfo(): Facility | null {
     const selectedId = getSelectedFacility();
     if (!selectedId) return null;
@@ -238,8 +246,8 @@ export function useAuth() {
       entityName: getEntityName(),
       entityId: getEntityId(),
       currentTenant: getCurrentTenant(),
-      // Use selectedFacilityId as facilityId if available, otherwise use entityId
-      facilityId: selectedFacility || getFacilityId(getEntityId()),
+      // Use selectedFacilityId as facilityId if available, otherwise fallback to stored facility ID
+      facilityId: selectedFacility || getFacilityId() || getEntityId(),
       selectedFacilityId: selectedFacility,
       facilities: getAvailableFacilities(),
       userName: getUserName(),
@@ -531,11 +539,30 @@ export function useAuth() {
           total_wound_encounters: item.total_wound_encounters,
           active_wounds: item.active_wounds,
           average_push_score: item.average_push_score,
-          acuity_level: item.acuity_level
+          acuity_level: item.acuity_level,
+          
+          // Fecha del último encounter
+          last_encounter_date: item.last_encounter_date
         }));
 
+        // Deduplicate facilities by ID (keep first occurrence)
+        const seenIds = new Set<string>();
+        const uniqueFacilities = facilities.filter(f => {
+          const id = String(f.id);
+          if (seenIds.has(id)) {
+            console.log(`[useAuth] ⚠️ Duplicate facility removed: ${f.name} (ID: ${id})`);
+            return false;
+          }
+          seenIds.add(id);
+          return true;
+        });
+        
+        if (uniqueFacilities.length !== facilities.length) {
+          console.warn(`[useAuth] ⚠️ Removed ${facilities.length - uniqueFacilities.length} duplicate facilities`);
+        }
+
         console.log("\n[useAuth] 📋 Detalles completos de cada facility:");
-        facilities.forEach((f, i) => {
+        uniqueFacilities.forEach((f, i) => {
           console.log(`\n  [Facility ${i + 1}] ${f.name || f.id}`);
           console.log(`    ID: ${f.id}`);
           console.log(`    Todos los campos:`, JSON.stringify(f, null, 4));
@@ -545,17 +572,17 @@ export function useAuth() {
         });
 
         // Store facilities in localStorage
-        setAvailableFacilities(facilities);
+        setAvailableFacilities(uniqueFacilities);
         
         console.log("\n[useAuth] 💾 Estado:");
         console.log("  ✅ Facilities guardadas en localStorage");
-        console.log("  ✅ Total facilities:", facilities.length);
+        console.log("  ✅ Total facilities:", uniqueFacilities.length);
         
         console.log("\n" + "=".repeat(80));
         console.log("[useAuth] ✅ getFacilities() COMPLETADO EXITOSAMENTE");
         console.log("=".repeat(80) + "\n");
 
-        return facilities;
+        return uniqueFacilities;
       }
 
       console.log("\n[useAuth] ⚠️  ADVERTENCIA: No se encontró array 'data' en la respuesta");
@@ -612,6 +639,7 @@ export function useAuth() {
     hasFacilities,
     getSelectedFacility,
     setSelectedFacility,
+    clearSelectedFacility,
     getSelectedFacilityInfo,
     getAvailableFacilities,
     setAvailableFacilities,

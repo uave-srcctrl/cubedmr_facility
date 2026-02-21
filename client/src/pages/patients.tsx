@@ -1,19 +1,28 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useMemo } from "react";
+import { format, isValid } from "date-fns";
 import {
-  LayoutDashboard,
   Users,
   Search,
-  Filter,
   ChevronRight,
   Phone,
   Mail,
   MapPin,
-  Calendar,
   AlertCircle,
+  Calendar as CalendarIcon,
+  RefreshCcw,
+  Activity,
+  ClipboardList,
+  CheckCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EcgLoader } from "@/components/ecg-loader";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Card,
   CardContent,
@@ -30,303 +39,396 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { mockPatients } from "@/lib/mockData";
+import { useSettings } from "@/hooks/use-settings";
+import { useFacilityPatientsByDate, usePatientDetail, PatientByDate } from "@/hooks/use-patients";
+import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { PatientDetailModal } from "@/components/patient-detail-modal";
-
-interface Patient {
-  id: string;
-  first_name: string;
-  last_name: string;
-  date_of_birth: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  city?: string;
-  status: "active" | "inactive" | "discharged";
-  created_at: string;
-  active_wounds?: number;
-  wounds?: any[];
-}
+import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { DataSourceBadge } from "@/components/data-source-badge";
+import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
+import { usePersistedDates } from "@/hooks/use-persisted-dates";
 
 export default function PatientsPage() {
   const { getSelectedFacility } = useAuth();
-  const facilityId = getSelectedFacility();
+  const { isComponentEnabled } = useSettings();
+  
+  // Use state for facilityId to support reactive updates
+  const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
+  
+  // Listen for facility changes
+  useEffect(() => {
+    const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
+      console.log('[PatientsPage] 🔄 Facility changed:', newFacilityId);
+      setFacilityId(newFacilityId);
+    });
+    return unsubscribe;
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive" | "discharged">("all");
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [patientFilter, setPatientFilter] = useState<'all' | 'active'>('active');
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  
+  // Persisted date picker state
+  const {
+    startDate,
+    endDate,
+    setStartDate,
+    setEndDate,
+    startDateStr,
+    endDateStr,
+    hasPersistedDates
+  } = usePersistedDates({ facilityId });
 
-  const { data: patients = [], isLoading, error } = useQuery({
-    queryKey: ["patients", facilityId],
-    queryFn: async () => {
-      if (!facilityId) return mockPatients;
-      try {
-        const response = await fetch(
-          `/api/facilities/${facilityId}/patients`,
-          { 
-            method: "GET",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            }
-          }
-        );
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch patients: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        // Si la API retorna datos vacíos, usar mock data como fallback
-        const apiData = result?.data || [];
-        return apiData.length > 0 ? apiData : mockPatients;
-      } catch (err) {
-        console.error("Error fetching patients, using mock data:", err);
-        // Usar mock data como fallback en caso de error
-        return mockPatients;
-      }
-    },
-    enabled: !!facilityId,
-  });
+  // Fetch enabled dates for the facility (dates with encounters)
+  const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId || '');
+  
+  // Calculate first encounter date from enabledDates
+  const firstEncounterDate = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const firstDateStr = enabledDates[0];
+      const [year, month, day] = firstDateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return undefined;
+  }, [enabledDates]);
 
-  const filteredPatients = patients.filter((patient: Patient) => {
-    const matchesSearch =
-      patient.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      patient.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      patient.id.toLowerCase().includes(searchTerm.toLowerCase());
+  // Calculate last encounter date from enabledDates
+  const lastEncounterDate = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const lastDateStr = enabledDates[enabledDates.length - 1];
+      const [year, month, day] = lastDateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return undefined;
+  }, [enabledDates]);
+  
+  // Set initial dates when enabledDates are loaded (start = first encounter, end = last encounter)
+  useEffect(() => {
+    if (hasPersistedDates) return; // Don't override persisted dates
+    if (!startDate && !endDate && firstEncounterDate && lastEncounterDate && !enabledDatesLoading) {
+      setStartDate(firstEncounterDate);
+      setEndDate(lastEncounterDate);
+    }
+  }, [firstEncounterDate, lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
 
-    const matchesStatus =
-      filterStatus === "all" || patient.status === filterStatus;
+  // Auto-swap dates if start > end
+  useEffect(() => {
+    if (startDate && endDate && startDate > endDate) {
+      const temp = startDate;
+      setStartDate(endDate);
+      setEndDate(temp);
+    }
+  }, [startDate, endDate]);
 
-    return matchesSearch && matchesStatus;
-  });
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "active":
-        return <Badge variant="default" className="bg-green-600">Active</Badge>;
-      case "inactive":
-        return <Badge variant="secondary">Inactive</Badge>;
-      case "discharged":
-        return <Badge variant="outline">Discharged</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
+  // Helper to safely format dates (avoids RangeError on invalid dates)
+  const safeFormat = (date: Date | undefined, formatStr: string): string => {
+    if (!date || !isValid(date)) return 'Invalid date';
+    try {
+      return format(date, formatStr);
+    } catch {
+      return 'Invalid date';
     }
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return dateString;
+  // Check if it's a single date (same start and end)
+  const isSingleDate = startDateStr === endDateStr;
+
+  // Fetch facility patients filtered by date range
+  const { data: facilityPatients = [], isLoading: patientsLoading, error: patientsError, refetch, isFetching } = useFacilityPatientsByDate(facilityId, startDateStr, endDateStr);
+
+  // Fetch patient details when a patient is selected
+  const { data: woundEncounters = [], isLoading: detailLoading } = usePatientDetail(facilityId, selectedPatientId);
+
+
+  const filteredPatients = facilityPatients.filter((patient: PatientByDate) => {
+    const patientName = patient?.patient_name || "";
+    const woundLocations = patient?.wound_locations || "";
+    
+    // Filter by active status
+    if (patientFilter === 'active' && (patient?.active_wounds ?? 0) === 0) {
+      return false;
     }
+    
+    // Filter by search term
+    let matchesSearch: boolean;
+    if (caseSensitive) {
+      matchesSearch =
+        patientName.includes(searchTerm) ||
+        woundLocations.includes(searchTerm);
+    } else {
+      const searchLower = searchTerm.toLowerCase();
+      matchesSearch =
+        patientName.toLowerCase().includes(searchLower) ||
+        woundLocations.toLowerCase().includes(searchLower);
+    }
+
+    return matchesSearch;
+  });
+
+  const handlePatientSelect = (patientId: string) => {
+    console.log("[Patients] Selecting patient:", patientId);
+    setSelectedPatientId(patientId);
+    setDetailModalOpen(true);
+  };
+
+  const renderPatientDetailModal = () => {
+    if (!selectedPatientId || !detailModalOpen) {
+      console.log("[Patients] Modal not rendering - selectedPatientId:", selectedPatientId, "open:", detailModalOpen);
+      return null;
+    }
+
+    const patient = facilityPatients.find(p => p.patient_id === selectedPatientId);
+    if (!patient) {
+      console.log("[Patients] Patient not found:", selectedPatientId);
+      return null;
+    }
+
+    console.log("[Patients] Rendering modal for:", selectedPatientId, "encounters:", woundEncounters.length, "loading:", detailLoading);
+
+    return (
+      <PatientDetailModal
+        patientId={selectedPatientId}
+        patientName={patient.patient_name}
+        woundEncounters={woundEncounters}
+        isLoading={detailLoading}
+        open={detailModalOpen}
+        onOpenChange={(open) => {
+          console.log("[Patients] Modal state changed to:", open);
+          setDetailModalOpen(open);
+        }}
+        facilityId={facilityId || ''}
+        startDate={startDateStr}
+        endDate={endDateStr}
+      />
+    );
   };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
-          <Users className="h-8 w-8 text-primary" />
-          Patients
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Manage the clinic's patient list
-        </p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <Users className="h-8 w-8 text-primary" />
+            Patients
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {isSingleDate 
+              ? "Patients seen on the selected date" 
+              : "Patients seen in the selected date range"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <DatePicker
+            date={startDate}
+            setDate={setStartDate}
+            label="Start Date"
+            enabledDates={enabledDates}
+            isLoading={enabledDatesLoading}
+            defaultMonth={startDate || lastEncounterDate}
+          />
+          <span className="text-muted-foreground">to</span>
+          <DatePicker
+            date={endDate}
+            setDate={setEndDate}
+            label="End Date"
+            enabledDates={enabledDates}
+            isLoading={enabledDatesLoading}
+            defaultMonth={endDate || lastEncounterDate}
+          />
+          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={patientsLoading || isFetching}>
+            <RefreshCcw className={cn("h-4 w-4", (patientsLoading || isFetching) && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
+      {/* Facility Info Banner - Hidden */}
+      {/* <FacilityInfoBanner /> */}
+
       {/* Filters and Search */}
+      {isComponentEnabled('patients', 'patient-search') && (
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by name or ID..."
+                placeholder="Search by name or wound location..."
                 className="pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant={filterStatus === "all" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("all")}
-              >
-                All
-              </Button>
-              <Button
-                variant={filterStatus === "active" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("active")}
-              >
-                Active
-              </Button>
-              <Button
-                variant={filterStatus === "inactive" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("inactive")}
-              >
-                Inactive
-              </Button>
+            <div className="flex flex-col gap-2">
+              
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="patient-filter"
+                  checked={patientFilter === 'active'}
+                  onCheckedChange={(checked) => setPatientFilter(checked ? 'active' : 'all')}
+                />
+                <Label htmlFor="patient-filter" className="text-sm text-muted-foreground cursor-pointer whitespace-nowrap">
+                  Active Patients
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="case-sensitive"
+                  checked={caseSensitive}
+                  onCheckedChange={setCaseSensitive}
+                />
+                <Label htmlFor="case-sensitive" className="text-sm text-muted-foreground cursor-pointer whitespace-nowrap">
+                  Case sensitive
+                </Label>
+              </div>
             </div>
           </div>
         </CardHeader>
       </Card>
+      )}
 
       {/* Stats Summary */}
-      {patients.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-3">
+      {isComponentEnabled('patients', 'patient-kpi-cards') && (
+      <>
+      {facilityPatients.length > 0 && (
+        <div className={cn("grid gap-4 grid-cols-1 md:grid-cols-3 transition-opacity duration-300", isFetching && "opacity-60")}>
+          {isComponentEnabled('patients', 'card-total-patients') && (
+          <Card className="border-l-4 border-l-primary shadow-sm hover:shadow-md transition-shadow min-h-[140px]">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Patients</CardTitle>
+              <Users className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{patients.length}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Active Patients</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {patients.filter((p: Patient) => p.status === "active").length}
+              <div className="text-4xl font-bold">{facilityPatients.length}</div>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-xs text-muted-foreground">patients seen</p>
+                <DataSourceBadge source="backend" showLabel={false} />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Total Wounds</CardTitle>
+          )}
+          {isComponentEnabled('patients', 'card-active-wounds') && (
+          <Card className="border-l-4 border-l-chart-2 shadow-sm hover:shadow-md transition-shadow min-h-[140px]">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Active Wounds</CardTitle>
+              <ClipboardList className="h-4 w-4 text-chart-2" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {patients.reduce((sum: number, p: Patient) => sum + (p.active_wounds || 0), 0)}
+              <div className="text-4xl font-bold">
+                {facilityPatients.reduce((sum: number, p: PatientByDate) => sum + (p.active_wounds || 0), 0)}
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-xs text-muted-foreground">total active wounds</p>
+                <DataSourceBadge source="backend" showLabel={false} />
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Discharged</CardTitle>
+          )}
+          {isComponentEnabled('patients', 'card-resolved-wounds') && (
+          <Card className="border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-shadow min-h-[140px]">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Resolved Wounds</CardTitle>
+              <CheckCircle className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {patients.filter((p: Patient) => p.status === "discharged").length}
+              <div className="text-4xl font-bold text-green-600">
+                {facilityPatients.reduce((sum: number, p: PatientByDate) => sum + (p.resolved_wounds || 0), 0)}
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-xs text-muted-foreground">total resolved wounds</p>
+                <DataSourceBadge source="backend" showLabel={false} />
               </div>
             </CardContent>
           </Card>
+          )}
         </div>
       )}
 
       {/* Patients Table */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            Patient List ({filteredPatients.length})
-          </CardTitle>
-          <CardDescription>
-            {isLoading ? "Loading patients..." : 
-             filteredPatients.length === 0 ? "No patients match your criteria" :
-             `Showing ${filteredPatients.length} of ${patients.length} patients`}
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>
+                Patients Seen ({filteredPatients.length})
+              </CardTitle>
+              <CardDescription>
+                {patientsLoading ? "Loading patients..." : 
+                 !startDate ? "Select a date range to view patients" :
+                 filteredPatients.length === 0 ? "No patients found for this date range" :
+                 isSingleDate 
+                   ? `Showing ${filteredPatients.length} patients seen on ${safeFormat(startDate, "PPP")}`
+                   : `Showing ${filteredPatients.length} patients seen from ${safeFormat(startDate, "PPP")} to ${safeFormat(endDate, "PPP")}`}
+              </CardDescription>
+            </div>
+            {isFetching && <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
         </CardHeader>
         <CardContent>
-          {error && (
+          {patientsError && (
             <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md flex gap-3">
               <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium text-destructive">Error loading patients</p>
                 <p className="text-sm text-destructive/80">
-                  There was a problem connecting to the server
+                  There was a problem fetching the patient list
                 </p>
               </div>
             </div>
           )}
 
-          {isLoading ? (
+          {patientsLoading && !facilityPatients.length ? (
+            <EcgLoader title="Loading patients..." minHeight="min-h-[300px]" />
+          ) : !startDate ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 mx-auto mb-4 animate-pulse" />
-                <p className="text-muted-foreground">Loading patients...</p>
+                <CalendarIcon className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
+                <p className="text-muted-foreground">Select a date range to view patients</p>
               </div>
             </div>
           ) : filteredPatients.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <Users className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-                <p className="text-muted-foreground">No patients to display</p>
+                <p className="text-muted-foreground">
+                  {isSingleDate ? "No patients seen on this date" : "No patients seen in this date range"}
+                </p>
               </div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className={cn("overflow-x-auto transition-opacity duration-300", isFetching && "opacity-60")}>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Patient ID</TableHead>
-                    <TableHead className="hidden sm:table-cell">Date of Birth</TableHead>
-                    <TableHead className="hidden md:table-cell">Contact</TableHead>
-                    <TableHead className="hidden lg:table-cell">Location</TableHead>
-                    <TableHead>Wounds</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Patient Name</TableHead>
+                    <TableHead className="hidden sm:table-cell">Wounds</TableHead>
+                    <TableHead>Wound Locations</TableHead>
                     <TableHead className="w-8"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredPatients.map((patient: Patient) => (
+                  {filteredPatients.map((patient: PatientByDate) => (
                     <TableRow
-                      key={patient.id}
+                      key={patient.patient_id}
                       className="hover:bg-muted/50 transition-colors cursor-pointer"
-                      onClick={() => {
-                        setSelectedPatient(patient);
-                        setDetailModalOpen(true);
-                      }}
+                      onClick={() => handlePatientSelect(patient.patient_id)}
                     >
                       <TableCell className="font-medium">
-                        {patient.first_name} {patient.last_name}
+                        {patient.patient_name || "Unknown Patient"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {patient.id}
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell text-sm">
-                        {formatDate(patient.date_of_birth)}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <div className="space-y-1 text-sm">
-                          {patient.phone && (
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <Phone className="h-3 w-3" />
-                              {patient.phone}
-                            </div>
-                          )}
-                          {patient.email && (
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <Mail className="h-3 w-3" />
-                              {patient.email}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell text-sm">
-                        {patient.address && (
-                          <div className="flex items-center gap-1 text-muted-foreground">
-                            <MapPin className="h-3 w-3" />
-                            {patient.city || patient.address}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <Badge variant="secondary">
-                          {patient.active_wounds || 0}
+                          {patient.wound_encounter_count || 0}
                         </Badge>
                       </TableCell>
-                      <TableCell>{getStatusBadge(patient.status)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[250px] truncate">
+                        {patient.wound_locations || '-'}
+                      </TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
@@ -344,13 +446,80 @@ export default function PatientsPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
 
       {/* Patient Detail Modal */}
-      <PatientDetailModal
-        patient={selectedPatient}
-        open={detailModalOpen}
-        onOpenChange={setDetailModalOpen}
-      />
+      {renderPatientDetailModal()}
     </div>
   );
+}
+
+function DatePicker({ 
+  date, 
+  setDate, 
+  label, 
+  enabledDates,
+  isLoading = false,
+  defaultMonth
+}: { 
+  date: Date | undefined, 
+  setDate: (d: Date | undefined) => void, 
+  label: string, 
+  enabledDates?: string[],
+  isLoading?: boolean,
+  defaultMonth?: Date
+}) {
+  const [open, setOpen] = useState(false);
+  
+  const enabledCount = enabledDates?.length ?? 0;
+  const dateInfo = enabledDates && enabledDates.length > 0 
+    ? `${enabledCount} date${enabledCount !== 1 ? 's' : ''} available`
+    : 'No dates available';
+
+  const handleDateSelect = (selectedDate: Date | undefined) => {
+    setDate(selectedDate);
+    if (selectedDate) {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant={"outline"}
+          className={cn(
+            "w-[228px] justify-start text-left font-normal",
+            !date && "text-muted-foreground",
+            isLoading && "opacity-60"
+          )}
+          disabled={isLoading}
+        >
+          <CalendarIcon className="mr-2 h-4 w-4" />
+          {isLoading ? (
+            <span className="animate-pulse">{label}...</span>
+          ) : (
+            date && isValid(date) ? format(date, "PPP") : <span>{label}</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[288px] p-0" align="start">
+        <div className="p-3 border-b bg-muted/50 text-xs text-muted-foreground">
+          {dateInfo}
+        </div>
+        <Calendar
+          key={open ? 'open' : 'closed'}
+          mode="single"
+          selected={date}
+          onSelect={handleDateSelect}
+          initialFocus
+          enabledDates={enabledDates}
+          isLoading={isLoading}
+          defaultMonth={date || defaultMonth}
+          className="w-full"
+        />
+      </PopoverContent>
+    </Popover>
+  )
 }

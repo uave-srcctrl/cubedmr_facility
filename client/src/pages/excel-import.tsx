@@ -16,6 +16,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useSettings } from '@/hooks/use-settings';
 import { createSampleExcel, validateExcelData } from '@/lib/excel-utils';
 
 interface ExcelRow {
@@ -30,6 +31,7 @@ interface ImportResult {
 }
 
 export default function ExcelImportPage() {
+  const { isComponentEnabled } = useSettings();
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -240,6 +242,7 @@ export default function ExcelImportPage() {
       </div>
 
       {/* Drop Zone */}
+      {isComponentEnabled('excel-import', 'upload-area') && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -293,6 +296,7 @@ export default function ExcelImportPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Progress */}
       {isProcessing && (
@@ -310,7 +314,7 @@ export default function ExcelImportPage() {
       )}
 
       {/* Preview */}
-      {previewData.length > 0 && (
+      {isComponentEnabled('excel-import', 'preview') && previewData.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Data Preview</CardTitle>

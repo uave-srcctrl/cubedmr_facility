@@ -102,6 +102,28 @@
   --chart-4: 0 72% 51%;    /* Alert Red */
   --chart-5: 262 83% 58%;  /* Purple (Other) */
 
+  /* Etiology Pastel Colors - Fill & Stroke pairs */
+  --etiology-1-fill: #dbeafe;    /* Blue pastel */
+  --etiology-1-stroke: #3b82f6;
+  --etiology-2-fill: #d1fae5;    /* Green pastel */
+  --etiology-2-stroke: #10b981;
+  --etiology-3-fill: #fef3c7;    /* Yellow pastel */
+  --etiology-3-stroke: #f59e0b;
+  --etiology-4-fill: #fce7f3;    /* Pink pastel */
+  --etiology-4-stroke: #ec4899;
+  --etiology-5-fill: #e0e7ff;    /* Indigo pastel */
+  --etiology-5-stroke: #6366f1;
+  --etiology-6-fill: #f3e8ff;    /* Purple pastel */
+  --etiology-6-stroke: #a855f7;
+  --etiology-7-fill: #ccfbf1;    /* Teal pastel */
+  --etiology-7-stroke: #14b8a6;
+  --etiology-8-fill: #fed7aa;    /* Orange pastel */
+  --etiology-8-stroke: #f97316;
+  --etiology-9-fill: #fecaca;    /* Red pastel */
+  --etiology-9-stroke: #ef4444;
+  --etiology-10-fill: #e5e7eb;   /* Gray pastel */
+  --etiology-10-stroke: #6b7280;
+
   /* Sidebar */
   --sidebar: 0 0% 100%;
   --sidebar-foreground: 222 47% 11%;

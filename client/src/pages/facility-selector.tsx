@@ -79,8 +79,24 @@ export default function FacilitySelectorPage() {
           return mapped;
         });
         
-        console.log(`[FacilitySelectorPage] ✅ Facilities mapeadas exitosamente: ${mappedFacilities.length} facilities`);
-        setFacilities(mappedFacilities);
+        // Deduplicate facilities by ID (keep first occurrence)
+        const seen = new Set<string>();
+        const uniqueFacilities = mappedFacilities.filter((facility: any) => {
+          const id = String(facility.id);
+          if (seen.has(id)) {
+            console.log(`[FacilitySelectorPage] ⚠️ Duplicate facility removed: ${facility.name} (ID: ${id})`);
+            return false;
+          }
+          seen.add(id);
+          return true;
+        });
+        
+        if (uniqueFacilities.length !== mappedFacilities.length) {
+          console.warn(`[FacilitySelectorPage] ⚠️ Removed ${mappedFacilities.length - uniqueFacilities.length} duplicate facilities`);
+        }
+        
+        console.log(`[FacilitySelectorPage] ✅ Facilities mapeadas exitosamente: ${uniqueFacilities.length} facilities`);
+        setFacilities(uniqueFacilities);
         setError(null);
         setIsLoading(false);
       } catch (err) {
@@ -136,6 +152,11 @@ export default function FacilitySelectorPage() {
     }
   };
 
+  const handleImportData = () => {
+    console.log("[FacilitySelectorPage] Navigating to import without facility selection");
+    navigate("/facility/data-import");
+  };
+
   // Error State - NO fallback
   if (error) {
     return (
@@ -154,6 +175,7 @@ export default function FacilitySelectorPage() {
       facilities={facilities}
       onSelectFacility={handleSelectFacility}
       onLogout={handleLogout}
+      onImportData={handleImportData}
       isLoading={isLoading}
     />
   );

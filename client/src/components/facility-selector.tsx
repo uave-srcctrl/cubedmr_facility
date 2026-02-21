@@ -2,7 +2,21 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Loader2, Building2, MapPin, Users, Zap, TrendingUp, LogOut } from "lucide-react";
+import { EcgLoader } from "@/components/ecg-loader";
+import { AlertCircle, Loader2, Building2, LogOut, FileUp } from "lucide-react";
+import { useSettings } from "@/hooks/use-settings";
+
+// Pastel background colors for facility cards
+const cardColors = [
+  "bg-blue-50 hover:bg-blue-100/70 dark:bg-blue-950/20 dark:hover:bg-blue-950/30",
+  "bg-green-50 hover:bg-green-100/70 dark:bg-green-950/20 dark:hover:bg-green-950/30",
+  "bg-purple-50 hover:bg-purple-100/70 dark:bg-purple-950/20 dark:hover:bg-purple-950/30",
+  "bg-pink-50 hover:bg-pink-100/70 dark:bg-pink-950/20 dark:hover:bg-pink-950/30",
+  "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-950/30",
+  "bg-teal-50 hover:bg-teal-100/70 dark:bg-teal-950/20 dark:hover:bg-teal-950/30",
+  "bg-indigo-50 hover:bg-indigo-100/70 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/30",
+  "bg-cyan-50 hover:bg-cyan-100/70 dark:bg-cyan-950/20 dark:hover:bg-cyan-950/30",
+];
 import { cn } from "@/lib/utils";
 
 interface Facility {
@@ -22,6 +36,7 @@ interface FacilitySelectorProps {
   facilities: Facility[];
   onSelectFacility: (facilityId: string) => void;
   onLogout?: () => void;
+  onImportData?: () => void;
   isLoading?: boolean;
 }
 
@@ -29,11 +44,18 @@ export function FacilitySelector({
   facilities,
   onSelectFacility,
   onLogout,
+  onImportData,
   isLoading = false
 }: FacilitySelectorProps) {
   const [selectedFacility, setSelectedFacility] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettings();
+
+  // Check if Import Data button should be shown based on settings
+  const showImportDataButton = settings.pages
+    .find(p => p.id === 'facility-selector')
+    ?.components?.find(c => c.id === 'import-data-button')?.enabled ?? true;
 
   // Pre-select first facility if none selected
   useEffect(() => {
@@ -49,11 +71,12 @@ export function FacilitySelector({
     }
   }, []);
 
-  const handleSelectFacility = async () => {
-    if (!selectedFacility) return;
+  const handleSelectFacility = async (facilityId: string) => {
+    if (!facilityId || isSubmitting) return;
     setIsSubmitting(true);
+    setSelectedFacility(facilityId);
     try {
-      onSelectFacility(selectedFacility);
+      onSelectFacility(facilityId);
     } finally {
       setIsSubmitting(false);
     }
@@ -61,7 +84,7 @@ export function FacilitySelector({
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && selectedFacility && !isSubmitting) {
-      handleSelectFacility();
+      handleSelectFacility(selectedFacility);
     }
   };
 
@@ -69,10 +92,7 @@ export function FacilitySelector({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-background to-muted/20">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
-          <p className="text-lg font-medium">Loading facilities...</p>
-        </div>
+        <EcgLoader title="Loading facilities..." minHeight="min-h-[300px]" />
       </div>
     );
   }
@@ -127,129 +147,71 @@ export function FacilitySelector({
         <CardContent className="space-y-6">
           {/* Facility Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {facilities.map((facility) => (
+            {facilities.map((facility, index) => (
               <div
                 key={facility.id}
-                onClick={() => setSelectedFacility(facility.id)}
+                onClick={() => handleSelectFacility(facility.id)}
                 className={cn(
                   "p-4 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md",
                   selectedFacility === facility.id
-                    ? "border-primary bg-primary/5 shadow-md"
-                    : "border-muted hover:border-primary/50 hover:bg-muted/50"
+                    ? "border-primary shadow-md"
+                    : "border-muted hover:border-primary/50",
+                  cardColors[index % cardColors.length]
                 )}
               >
-                <div className="space-y-3">
-                  {/* Header con nombre y radio button */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold text-base">
-                        {facility.name || `Facility ${facility.id}`}
-                      </h3>
-                      {facility.acuity_level && (
-                        <p className={cn(
-                          "text-xs font-medium mt-1",
-                          facility.acuity_level === "Crítico" ? "text-red-600" :
-                          facility.acuity_level === "Alerta" ? "text-orange-600" :
-                          facility.acuity_level === "Monitoreo" ? "text-yellow-600" :
-                          "text-green-600"
-                        )}>
-                          {facility.acuity_level}
-                        </p>
-                      )}
-                    </div>
-                    <div 
-                      className={cn(
-                        "h-5 w-5 rounded-full border-2 flex-shrink-0 transition-all",
-                        selectedFacility === facility.id
-                          ? "border-primary bg-primary"
-                          : "border-muted-foreground/30"
-                      )}
-                    />
-                  </div>
-
-                  {/* Info con detalles de heridas */}
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    {facility.total_wound_encounters && (
-                      <div className="flex items-center gap-2">
-                        <Zap className="h-3 w-3" />
-                        <span>
-                          {facility.total_wound_encounters} total wound encounters
-                        </span>
-                      </div>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-base">
+                    {facility.name || `Facility ${facility.id}`}
+                  </h3>
+                  <div 
+                    className={cn(
+                      "h-5 w-5 rounded-full border-2 flex-shrink-0 transition-all",
+                      selectedFacility === facility.id
+                        ? "border-primary bg-primary"
+                        : "border-muted-foreground/30"
                     )}
-                    
-                    {facility.active_wounds !== undefined && (
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="h-3 w-3" />
-                        <span>
-                          {facility.active_wounds} active wound{facility.active_wounds !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {facility.average_push_score && (
-                      <div className="flex items-center gap-2">
-                        <span>Avg PUSH: {facility.average_push_score}</span>
-                      </div>
-                    )}
-
-                    {facility.location && (
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-3 w-3" />
-                        <span>{facility.location}</span>
-                      </div>
-                    )}
-
-                    {facility.patients && (
-                      <div className="flex items-center gap-2">
-                        <Users className="h-3 w-3" />
-                        <span>{facility.patients} total patients</span>
-                      </div>
-                    )}
-
-                    {facility.activePatients && (
-                      <div className="flex items-center gap-2">
-                        <Users className="h-3 w-3" />
-                        <span>{facility.activePatients} active patients</span>
-                      </div>
-                    )}
-                  </div>
+                  />
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Action Buttons */}
+          {/* Multiple Facilities Info */}
           {facilities.length > 1 && (
-            <Alert className="bg-blue-50 border-blue-200 text-blue-900">
-              <AlertCircle className="h-4 w-4 text-blue-600" />
-              <AlertTitle className="text-blue-900">Multiple Facilities</AlertTitle>
-              <AlertDescription className="text-blue-800 text-sm">
+            <Alert className="bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-100">
+              <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <AlertTitle className="text-blue-900 dark:text-blue-100">Multiple Facilities</AlertTitle>
+              <AlertDescription className="text-blue-800 dark:text-blue-200 text-sm">
                 You can change facilities anytime from the menu after logging in.
               </AlertDescription>
             </Alert>
           )}
 
-          {/* Submit Button */}
-          <Button
-            onClick={handleSelectFacility}
-            disabled={!selectedFacility || isSubmitting}
-            className="w-full"
-            size="lg"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              "Continue to Dashboard"
-            )}
-          </Button>
+          {/* Loading indicator when submitting */}
+          {isSubmitting && (
+            <div className="flex items-center justify-center gap-2 text-primary">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading facility...</span>
+            </div>
+          )}
 
-          {/* Keyboard shortcut hint */}
+          {/* Import Data Button */}
+          {onImportData && showImportDataButton && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                onClick={onImportData}
+                className="text-primary hover:bg-primary/10"
+              >
+                <FileUp className="h-4 w-4 mr-2" />
+                Import Data
+              </Button>
+            </div>
+          )}
+
+          {/* Hint */}
           <p className="text-center text-xs text-muted-foreground">
-            💡 Press Enter to continue or click any facility above
+            💡 Click on a facility to access it
           </p>
         </CardContent>
       </Card>

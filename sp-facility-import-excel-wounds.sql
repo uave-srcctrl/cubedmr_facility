@@ -166,8 +166,7 @@ BEGIN
       healing_rate,
       healing_days,
       push_score,
-      created_date,
-      import_source
+      import_id
     )
     SELECT 
       LTRIM(RTRIM(T.c.value('(patient_id/text())[1]', 'NVARCHAR(50)'))) AS patient_id,
@@ -175,11 +174,13 @@ BEGIN
       CAST(NULLIF(T.c.value('(provider_id/text())[1]', 'NVARCHAR(50)'), '') AS INT) AS provider_id,
       LTRIM(RTRIM(T.c.value('(patient_name/text())[1]', 'NVARCHAR(100)'))) AS patient_name,
       LTRIM(RTRIM(T.c.value('(location/text())[1]', 'NVARCHAR(100)'))) AS location,
-      LTRIM(RTRIM(T.c.value('(etiology/text())[1]', 'NVARCHAR(100)'))) AS etiology,
-      CAST(NULLIF(T.c.value('(width/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,2)) AS width,
-      CAST(NULLIF(T.c.value('(height/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,2)) AS height,
-      CAST(NULLIF(T.c.value('(depth/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,2)) AS depth,
-      CAST(T.c.value('(surface/text())[1]', 'NVARCHAR(20)') AS DECIMAL(10,2)) AS surface,
+      -- Normalize etiology to standard format (e.g., "Pressure, Stage 3" -> "Pressure (III)")
+      facility.fn_normalize_etiology(LTRIM(RTRIM(T.c.value('(etiology/text())[1]', 'NVARCHAR(100)')))) AS etiology,
+      -- Using larger precision to prevent overflow
+      CAST(NULLIF(T.c.value('(width/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(12,4)) AS width,
+      CAST(NULLIF(T.c.value('(height/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(12,4)) AS height,
+      CAST(NULLIF(T.c.value('(depth/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(12,4)) AS depth,
+      CAST(T.c.value('(surface/text())[1]', 'NVARCHAR(20)') AS DECIMAL(15,4)) AS surface,
       NULLIF(LTRIM(RTRIM(T.c.value('(exudate/text())[1]', 'NVARCHAR(50)'))), '') AS exudate,
       NULLIF(LTRIM(RTRIM(T.c.value('(tissue/text())[1]', 'NVARCHAR(100)'))), '') AS tissue,
       NULLIF(LTRIM(RTRIM(T.c.value('(treatment/text())[1]', 'NVARCHAR(MAX)'))), '') AS treatment,
@@ -187,16 +188,17 @@ BEGIN
       LTRIM(RTRIM(T.c.value('(progress/text())[1]', 'NVARCHAR(50)'))) AS progress,
       LTRIM(RTRIM(T.c.value('(disposition/text())[1]', 'NVARCHAR(50)'))) AS disposition,
       NULLIF(LTRIM(RTRIM(T.c.value('(debridement/text())[1]', 'NVARCHAR(50)'))), '') AS debridement,
-      CAST(NULLIF(T.c.value('(initial_surface/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,2)) AS initial_surface,
+      CAST(NULLIF(T.c.value('(initial_surface/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(15,4)) AS initial_surface,
       TRY_CONVERT(DATE, T.c.value('(start_date/text())[1]', 'NVARCHAR(20)'), 120) AS start_date,
       TRY_CONVERT(DATE, T.c.value('(dos/text())[1]', 'NVARCHAR(20)'), 120) AS dos,
       CAST(NULLIF(T.c.value('(days/text())[1]', 'NVARCHAR(20)'), '') AS INT) AS days,
-      CAST(NULLIF(T.c.value('(healing_percentage/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(5,2)) AS healing_percentage,
-      CAST(NULLIF(T.c.value('(healing_rate/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,2)) AS healing_rate,
+      -- Using larger precision to prevent overflow (DECIMAL(10,4) supports up to 999999.9999)
+      CAST(NULLIF(T.c.value('(healing_percentage/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(10,4)) AS healing_percentage,
+      -- Using larger precision (DECIMAL(15,4) supports very large values)
+      CAST(NULLIF(T.c.value('(healing_rate/text())[1]', 'NVARCHAR(20)'), '') AS DECIMAL(15,4)) AS healing_rate,
       CAST(NULLIF(T.c.value('(healing_days/text())[1]', 'NVARCHAR(20)'), '') AS INT) AS healing_days,
       CAST(T.c.value('(push_score/text())[1]', 'NVARCHAR(20)') AS INT) AS push_score,
-      GETDATE() AS created_date,
-      @importedBy AS import_source
+      TRY_CONVERT(UNIQUEIDENTIFIER, T.c.value('(import_id/text())[1]', 'NVARCHAR(50)')) AS import_id
     FROM @importData.nodes('/wounds/wound') AS T(c);
     
     SET @successCount = @@ROWCOUNT;

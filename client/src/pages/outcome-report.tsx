@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, subDays, subMonths } from "date-fns";
-import { Calendar as CalendarIcon, FileDown, Loader2, AlertCircle, RefreshCcw } from "lucide-react";
+import { Calendar as CalendarIcon, FileDown, AlertCircle, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -13,15 +13,38 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/hooks/use-auth";
+import { useSettings } from "@/hooks/use-settings";
+import { useReportDateRange } from "@/hooks/use-report-date-range";
+import { useEnabledDates } from "@/hooks/use-enabled-dates";
+import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
 import { DataSourceBadge } from "@/components/data-source-badge";
+import { EcgLoader } from "@/components/ecg-loader";
 import { REMOTE_API, getFacilityId } from "@/lib/api-config";
 import { normalizeFieldNames } from "@/lib/field-mapper";
 
 export default function OutcomeReportGlobal() {
-  const { getAuthInfo } = useAuth();
+  const { getAuthInfo, getSelectedFacility } = useAuth();
+  const { isComponentEnabled } = useSettings();
+  const { startDate, endDate, setStartDate, setEndDate, startDateStr, endDateStr } = useReportDateRange();
   const authInfo = getAuthInfo();
-  const facilityId = getFacilityId(authInfo.entityId);
+  
+  // Use state for facilityId to support reactive updates
+  const [facilityId, setFacilityId] = useState<string | null>(() => {
+    // First try getSelectedFacility, then fallback to getFacilityId
+    const selected = getSelectedFacility();
+    return selected || getFacilityId(authInfo.entityId);
+  });
+  const { data: enabledDates = [] } = useEnabledDates(facilityId);
+  
+  // Listen for facility changes
+  useEffect(() => {
+    const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
+      console.log('[OutcomeReport] 🔄 Facility changed:', newFacilityId);
+      setFacilityId(newFacilityId);
+    });
+    return unsubscribe;
+  }, []);
   
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!facilityId) {
@@ -40,18 +63,12 @@ export default function OutcomeReportGlobal() {
 
   const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
   
-  const [startDate, setStartDate] = useState<Date | undefined>(subMonths(new Date(), 12));
-  const [endDate, setEndDate] = useState<Date | undefined>(new Date());
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['outcomeReportGlobal', startDate ? format(startDate, 'yyyy-MM-dd') : null, endDate ? format(endDate, 'yyyy-MM-dd') : null, facilityId],
+    queryKey: ['outcomeReportGlobal', startDateStr, endDateStr, facilityId],
     queryFn: async () => {
-      if (!startDate || !endDate) return null;
-
-      const formattedStartDate = format(startDate, 'yyyy-MM-dd');
-      const formattedEndDate = format(endDate, 'yyyy-MM-dd');
-      const url = REMOTE_API.OUTCOME_REPORT_GLOBAL(facilityId, formattedStartDate, formattedEndDate);
+      const url = REMOTE_API.OUTCOME_REPORT_GLOBAL(facilityId, startDateStr, endDateStr);
 
       const response = await fetch(url);
 
@@ -74,7 +91,6 @@ export default function OutcomeReportGlobal() {
       // Normalize field names from backend format
       return normalizeFieldNames(data);
     },
-    enabled: !!startDate && !!endDate,
   });
   
   // Track data source based on response - use useEffect to properly update state
@@ -101,9 +117,13 @@ export default function OutcomeReportGlobal() {
             <p className="text-muted-foreground mt-1">Comprehensive clinical outcomes over a selected period</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" />
+            {isComponentEnabled('outcome-report', 'timeline') && (
+            <>
+            <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" enabledDates={enabledDates} />
             <span className="text-muted-foreground">-</span>
-            <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" />
+            <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" enabledDates={enabledDates} />
+            </>
+            )}
             <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
               <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
             </Button>
@@ -115,7 +135,7 @@ export default function OutcomeReportGlobal() {
         </div>
       </div>
 
-      <FacilityInfoBanner facilityId={facilityId} facilityName={facilityName} />
+      {/* <FacilityInfoBanner facilityId={facilityId} facilityName={facilityName} /> */}
 
       {error ? (
         <Alert variant="destructive">
@@ -126,10 +146,7 @@ export default function OutcomeReportGlobal() {
           </AlertDescription>
         </Alert>
       ) : isLoading ? (
-        <div className="flex flex-col items-center justify-center h-[400px] space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Loading outcome data...</p>
-        </div>
+        <EcgLoader title="Loading outcome data..." minHeight="min-h-[400px]" />
       ) : !data ? (
          <Alert>
           <AlertCircle className="h-4 w-4" />
@@ -139,6 +156,7 @@ export default function OutcomeReportGlobal() {
       ) : (
         <>
           {/* Primary Outcomes */}
+          {isComponentEnabled('outcome-report', 'statistics') && (
           <div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatCard title="Overall Resolution Rate" value={`${(Number(reportData.overallResolutionRate) * 100).toFixed(2)}%`} trend="positive" source={dataSource} />
@@ -147,7 +165,9 @@ export default function OutcomeReportGlobal() {
               <StatCard title="Hospitalization Rate" value={reportData.currentHospitalizationRate ? `${(Number(reportData.currentHospitalizationRate) * 100).toFixed(2)}%` : "--"} trend="negative" source={dataSource} />
             </div>
           </div>
+          )}
 
+          {isComponentEnabled('outcome-report', 'comparisons') && (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {/* Status Breakdown */}
             <Card className="col-span-1 relative">
@@ -160,30 +180,6 @@ export default function OutcomeReportGlobal() {
                 <MetricRow label="Deteriorating" value={`${(Number(reportData.deteriorating) * 100).toFixed(2)}%`} color="text-destructive" />
                 <MetricRow label="New Wounds" value={reportData.newWounds || 0} />
                 <MetricRow label="Resolved Wounds" value={reportData.resolvedWounds || 0} />
-              </CardContent>
-              <div className="absolute top-4 right-4">
-                <DataSourceBadge source={dataSource} showLabel={false} />
-              </div>
-            </Card>
-
-            {/* Healing Times */}
-            <Card className="col-span-1 lg:col-span-2 relative">
-              <CardHeader>
-                <CardTitle>Average Healing Times (Days)</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-4">
-                    <MetricRow label="All Wounds" value={reportData.avgHealingTimeAll || 0} />
-                    <MetricRow label="Arterial Wounds" value={reportData.avgHealingTimeArterial || 0} />
-                    <MetricRow label="Venous Wounds" value={reportData.avgHealingTimeVenous || 0} />
-                    <MetricRow label="Diabetic Wounds" value={reportData.avgHealingTimeDiabetic || 0} />
-                </div>
-                <div className="space-y-4">
-                    <MetricRow label="Pressure Ulcers - Stage I" value={reportData.avgHealingTimePressureI || 0} />
-                    <MetricRow label="Pressure Ulcers - Stage II" value={reportData.avgHealingTimePressureII || 0} />
-                    <MetricRow label="Pressure Ulcers - Stage III" value={reportData.avgHealingTimePressureIII || 0} />
-                    <MetricRow label="Pressure Ulcers - Stage IV" value={reportData.avgHealingTimePressureIV || 0} />
-                </div>
               </CardContent>
               <div className="absolute top-4 right-4">
                 <DataSourceBadge source={dataSource} showLabel={false} />
@@ -205,13 +201,14 @@ export default function OutcomeReportGlobal() {
               </div>
             </Card>
           </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function DateRangePicker({ date, setDate, label }: { date: Date | undefined, setDate: (d: Date | undefined) => void, label: string }) {
+function DateRangePicker({ date, setDate, label, enabledDates }: { date: Date | undefined, setDate: (d: Date | undefined) => void, label: string, enabledDates?: string[] }) {
     return (
         <Popover>
             <PopoverTrigger asChild>
@@ -232,6 +229,7 @@ function DateRangePicker({ date, setDate, label }: { date: Date | undefined, set
                 selected={date}
                 onSelect={setDate}
                 initialFocus
+                enabledDates={enabledDates}
                 className="w-full"
               />
             </PopoverContent>

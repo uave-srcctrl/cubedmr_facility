@@ -49,6 +49,20 @@ app.use((req, res, next) => {
   next();
 });
 
+// CORS: Enable CORS for local development and API requests
+app.use((req, res, next) => {
+  const origin = req.headers.origin || req.headers.host || "http://localhost";
+  res.setHeader("Access-Control-Allow-Origin", "*"); // Allow all origins for local dev
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Facility-Id, X-Requested-With");
+  
+  // Handle preflight requests
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -66,16 +80,10 @@ const proxy = httpProxy.createProxyServer({
   timeout: 30000,
 });
 
-// Proxy requests to localhost:8080 -> Apache on localhost:80
-app.use('/api/get', (req, res) => {
-  console.log(`[Proxy] Forwarding to Apache: ${req.method} /api/get`);
-  proxy.web(req, res, (err) => {
-    if (err) {
-      console.error('[Proxy] Error:', err.message);
-      res.status(502).json({ status: false, error: 'Gateway error', details: err.message });
-    }
-  });
-});
+// NOTE: /api/get is handled by routes.ts (see registerRoutes)
+// The proxy is only used for requests that are NOT handled by Express routes
+// Export proxy for use in routes if needed
+export { proxy };
 
 // Middleware para manejar rutas de API con y sin prefijo /facility
 // Esto permite que Apache pueda enviar /facility/api/... y el servidor lo entienda como /api/...

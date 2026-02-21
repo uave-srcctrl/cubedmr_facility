@@ -19,15 +19,79 @@ function Calendar({
   buttonVariant = "ghost",
   formatters,
   components,
+  enabledDates,
+  isLoading = false,
+  defaultMonth,
+  maxDate,
   ...props
 }: React.ComponentProps<typeof DayPicker> & {
   buttonVariant?: React.ComponentProps<typeof Button>["variant"]
+  enabledDates?: string[] // Array of date strings in YYYY-MM-DD format
+  isLoading?: boolean // Loading state for enabled dates
+  defaultMonth?: Date // Extract as prop so we can control it explicitly
+  maxDate?: Date // Max selectable date - dates after this are disabled
 }) {
+  // Use month state to track current month, initialized from defaultMonth
+  const [month, setMonth] = React.useState<Date | undefined>(defaultMonth);
+  
+  // Update month when defaultMonth changes (important for date picker behavior)
+  React.useEffect(() => {
+    if (defaultMonth) {
+      console.log('[Calendar] defaultMonth changed, updating internal month to:', defaultMonth);
+      setMonth(defaultMonth);
+    }
+  }, [defaultMonth]);
+  const disabled = (date: Date) => {
+    // If loading, disable all dates
+    if (isLoading) {
+      return true;
+    }
+
+    // If enabledDates is provided, use that logic
+    if (enabledDates !== undefined) {
+      // If enabledDates is an empty array, disable all dates (no encounters available)
+      if (Array.isArray(enabledDates) && enabledDates.length === 0) {
+        return true; // No encounters - ALL dates disabled
+      }
+
+      // If enabledDates has data, only enable dates in the array
+      if (Array.isArray(enabledDates) && enabledDates.length > 0) {
+        // Format date as YYYY-MM-DD (UTC to avoid timezone issues)
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        
+        const isEnabled = enabledDates.includes(dateStr);
+        const shouldDisable = !isEnabled;
+        return shouldDisable;
+      }
+      
+      return true;
+    }
+
+    // If maxDate is provided, disable dates after maxDate
+    if (maxDate) {
+      // Compare dates without time
+      const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const maxDateOnly = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
+      if (dateOnly > maxDateOnly) {
+        return true;
+      }
+    }
+
+    // Default: all dates enabled when no enabledDates or maxDate restrictions
+    return false;
+  };
+  
   const defaultClassNames = getDefaultClassNames()
 
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      disabled={disabled}
+      month={month}
+      onMonthChange={setMonth}
       className={cn(
         "bg-background group/calendar p-3 [--cell-size:2rem] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,

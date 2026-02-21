@@ -1,0 +1,4 @@
+Security & Compliance
+Delete all files after processing.
+Never store PHI unless required and secure.
+Use HTTPS and authentication.

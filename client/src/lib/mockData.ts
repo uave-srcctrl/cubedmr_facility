@@ -34,11 +34,11 @@ export const dashboardKPIs = {
 
 // Mock Data for Charts
 export const woundEtiologyData = [
-  { name: "Pressure Ulcer", value: 45, fill: "hsl(var(--chart-1))" },
-  { name: "Venous Stasis", value: 25, fill: "hsl(var(--chart-2))" },
-  { name: "Diabetic", value: 20, fill: "hsl(var(--chart-3))" },
-  { name: "Arterial", value: 5, fill: "hsl(var(--chart-4))" },
-  { name: "Surgical", value: 5, fill: "hsl(var(--chart-5))" },
+  { name: "Pressure Ulcer", value: 45, fill: "#dbeafe", stroke: "#3b82f6" },
+  { name: "Venous Stasis", value: 25, fill: "#d1fae5", stroke: "#10b981" },
+  { name: "Diabetic", value: 20, fill: "#fef3c7", stroke: "#f59e0b" },
+  { name: "Arterial", value: 5, fill: "#fce7f3", stroke: "#ec4899" },
+  { name: "Surgical", value: 5, fill: "#e0e7ff", stroke: "#6366f1" },
 ];
 
 export const woundReductionData = [

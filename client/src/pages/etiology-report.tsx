@@ -1,32 +1,39 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Calendar as CalendarIcon, Loader2, AlertCircle, RefreshCcw } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Calendar as CalendarIcon, AlertCircle, RefreshCcw } from "lucide-react";
+import { cn, normalizeEtiology } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EcgLoader } from "@/components/ecg-loader";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/hooks/use-auth";
+import { useSettings } from "@/hooks/use-settings";
+import { useEnabledDates } from "@/hooks/use-enabled-dates";
+import { useWoundsByEtiology } from "@/hooks/use-patients";
+import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
+import { usePersistedDates } from "@/hooks/use-persisted-dates";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
 import { DataSourceBadge } from "@/components/data-source-badge";
-import { EcgLoader } from "@/components/ecg-loader";
-import { LOCAL_API, getFacilityId } from "@/lib/api-config";
+import { WoundsByEtiologyModal } from "@/components/wounds-by-etiology-modal";
+import { LOCAL_API } from "@/lib/api-config";
 import { normalizeFieldNamesArray } from "@/lib/field-mapper";
+import { useLocation } from "wouter";
 
-// Colors for the chart
+// Colors for the chart - pastel with solid border colors
 const COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-  "hsl(var(--chart-5))",
-  "#8884d8",
-  "#82ca9d",
-  "#ffc658"
+  { fill: "#dbeafe", stroke: "#3b82f6" },   // Blue pastel
+  { fill: "#d1fae5", stroke: "#10b981" },   // Green pastel
+  { fill: "#fef9c3", stroke: "#eab308" },   // Yellow pastel
+  { fill: "#fee2e2", stroke: "#ef4444" },   // Red pastel
+  { fill: "#ede9fe", stroke: "#8b5cf6" },   // Purple pastel
+  { fill: "#e0e7ff", stroke: "#6366f1" },   // Indigo pastel
+  { fill: "#ccfbf1", stroke: "#14b8a6" },   // Teal pastel
+  { fill: "#ffedd5", stroke: "#f97316" }    // Orange pastel
 ];
 
 interface EtiologyItem {
@@ -36,9 +43,100 @@ interface EtiologyItem {
 }
 
 export default function EtiologyReport() {
-  const { getAuthInfo, getToken } = useAuth();
-  const authInfo = getAuthInfo();
-  const facilityId = getFacilityId(authInfo.entityId);
+  const { getToken, getSelectedFacility } = useAuth();
+  const { isComponentEnabled } = useSettings();
+  
+  // Use state for facilityId to support reactive updates
+  const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
+  
+  // Wounds by etiology modal state
+  const [etiologyModalOpen, setEtiologyModalOpen] = useState(false);
+  const [selectedEtiology, setSelectedEtiology] = useState<string | null>(null);
+  const [pressedEtiologyIndex, setPressedEtiologyIndex] = useState<number | null>(null);
+  const [hiddenEtiologies, setHiddenEtiologies] = useState<Set<string>>(new Set());
+  
+  // Persisted date picker state
+  const {
+    startDate,
+    endDate,
+    setStartDate,
+    setEndDate,
+    startDateStr,
+    endDateStr,
+    hasPersistedDates
+  } = usePersistedDates({ facilityId });
+  
+  // Listen for facility changes
+  useEffect(() => {
+    const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
+      console.log('[EtiologyReport] 🔄 Facility changed:', newFacilityId);
+      setFacilityId(newFacilityId);
+    });
+    return unsubscribe;
+  }, []);
+  
+  // Fetch enabled dates for the facility (dates with encounters)
+  const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId);
+  
+  // Get wounds by etiology data - only fetch when etiology is selected
+  const { data: woundsByEtiologyData, isLoading: woundsByEtiologyLoading, refetch: refetchWoundsByEtiology } = useWoundsByEtiology(
+    facilityId || '',
+    selectedEtiology,
+    startDateStr,
+    endDateStr
+  );
+  
+  // Calculate first encounter date from enabledDates
+  const firstEncounterDate = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const firstDateStr = enabledDates[0];
+      const [year, month, day] = firstDateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return undefined;
+  }, [enabledDates]);
+
+  // Calculate last encounter date from enabledDates
+  const lastEncounterDate = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const lastDateStr = enabledDates[enabledDates.length - 1];
+      const [year, month, day] = lastDateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return undefined;
+  }, [enabledDates]);
+
+  // Calculate visible components for dynamic grid
+  const visibleEtiologyComponents = useMemo(() => {
+    const components = ['etiology-breakdown', 'patterns'];
+    return components.filter(c => isComponentEnabled('etiology-report', c)).length;
+  }, [isComponentEnabled]);
+
+  const etiologyGridClass = useMemo(() => {
+    if (visibleEtiologyComponents <= 1) return 'grid gap-6 grid-cols-1';
+    return 'grid gap-6 lg:grid-cols-2';
+  }, [visibleEtiologyComponents]);
+  
+  // Set initial dates when enabledDates are loaded (start = first encounter, end = last encounter)
+  useEffect(() => {
+    if (hasPersistedDates) return; // Don't override persisted dates
+    if (!startDate && !endDate && firstEncounterDate && lastEncounterDate && !enabledDatesLoading) {
+      setStartDate(firstEncounterDate);
+      setEndDate(lastEncounterDate);
+    }
+  }, [firstEncounterDate, lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
+
+  // Auto-swap dates if start > end
+  useEffect(() => {
+    if (startDate && endDate && startDate > endDate) {
+      const temp = startDate;
+      setStartDate(endDate);
+      setEndDate(temp);
+    }
+  }, [startDate, endDate]);
+
+  // Check if it's a single date (same start and end)
+  const isSingleDate = startDateStr === endDateStr;
   
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!facilityId) {
@@ -55,17 +153,14 @@ export default function EtiologyReport() {
     );
   }
 
-  const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
   const token = getToken();
   
-  const [date, setDate] = useState<Date>(new Date());
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['etiologyReport', format(date, 'yyyy-MM-dd'), facilityId],
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['etiologyReport', startDateStr, endDateStr, facilityId],
     queryFn: async () => {
-      const formattedDate = format(date, 'yyyy-MM-dd');
-      const url = `${LOCAL_API.ETIOLOGY_DISTRIBUTION}?date=${formattedDate}`;
+      const url = `${LOCAL_API.ETIOLOGY_DISTRIBUTION}?dosStart=${startDateStr}&dosEnd=${endDateStr}`;
       
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -107,7 +202,8 @@ export default function EtiologyReport() {
       }
       // Normalize field names from backend format
       return normalizeFieldNamesArray(data);
-    }
+    },
+    placeholderData: keepPreviousData,
   });
 
   // Track data source based on response - use useEffect to properly update state
@@ -130,15 +226,19 @@ export default function EtiologyReport() {
     if (etiologyName === 'null' || etiologyName === null) {
       etiologyName = 'Other';
     }
+    // Normalize pressure etiology variants
+    etiologyName = normalizeEtiology(etiologyName);
     return {
       name: etiologyName,
       value: Number(item.count || item.Count || item.value || 0),
       percentage: Number(item.percentage || item.Percentage || 0),
-      fill: COLORS[0] // Placeholder, will assign in render
+      fill: COLORS[0].fill,
+      stroke: COLORS[0].stroke
     };
   }).map((item: any, index: number) => ({
     ...item,
-    fill: COLORS[index % COLORS.length]
+    fill: COLORS[index % COLORS.length].fill,
+    stroke: COLORS[index % COLORS.length].stroke
   }));
 
   const totalCount = processedData.reduce((acc: number, curr: any) => acc + curr.value, 0);
@@ -149,41 +249,39 @@ export default function EtiologyReport() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
               <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
-              <p className="text-muted-foreground mt-1">Breakdown of wound types by classification and frequency</p>
+              <p className="text-muted-foreground mt-1">
+                {isSingleDate 
+                  ? "Breakdown of wound types for selected date" 
+                  : "Breakdown of wound types for selected date range"}
+              </p>
           </div>
           
-          <div className="flex items-center gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant={"outline"}
-                className={cn(
-                  "w-[288px] justify-start text-left font-normal",
-                  !date && "text-muted-foreground"
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {date ? format(date, "PPP") : <span>Pick a date</span>}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[288px] p-0" align="end">
-              <Calendar
-                mode="single"
-                selected={date}
-                onSelect={(d) => d && setDate(d)}
-                initialFocus
-                className="w-full"
-              />
-            </PopoverContent>
-          </Popover>
-          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-            <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-          </Button>
-        </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <DatePicker
+              date={startDate}
+              setDate={setStartDate}
+              label="Start Date"
+              enabledDates={enabledDates}
+              isLoading={enabledDatesLoading}
+              defaultMonth={startDate || firstEncounterDate}
+            />
+            <span className="text-muted-foreground">to</span>
+            <DatePicker
+              date={endDate}
+              setDate={setEndDate}
+              label="End Date"
+              enabledDates={enabledDates}
+              isLoading={enabledDatesLoading}
+              defaultMonth={endDate || lastEncounterDate}
+            />
+            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+            </Button>
+          </div>
       </div>
       </div>
       
-      <FacilityInfoBanner facilityId={facilityId} facilityName={facilityName} />
+      {/* <FacilityInfoBanner /> */}
 
       {error ? (
         <Alert variant="destructive">
@@ -194,45 +292,70 @@ export default function EtiologyReport() {
           </AlertDescription>
         </Alert>
       ) : isLoading ? (
-        <div className="flex flex-col items-center justify-center h-[400px] space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Loading report data...</p>
-        </div>
+        <EcgLoader title="Loading report data..." minHeight="min-h-[400px]" />
       ) : processedData.length === 0 ? (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
           <AlertDescription>
-            No records found for the selected date ({format(date, 'PPP')}). Try selecting a different date.
+            {startDate && isSingleDate 
+              ? `No records found for ${format(startDate, 'MMM dd, yyyy')}. Try selecting a different date.`
+              : startDate && endDate 
+                ? `No records found for ${format(startDate, 'MMM dd')} - ${format(endDate, 'MMM dd')}. Try selecting a different date range.`
+                : 'Select a date range to view data.'}
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className={etiologyGridClass}>
+            {isComponentEnabled('etiology-report', 'etiology-breakdown') && (
             <Card>
                 <CardHeader className="relative pb-2">
-                    <CardTitle>Visual Distribution</CardTitle>
-                    <CardDescription>Proportion of wound types for {format(date, 'PPP')}</CardDescription>
+                    <CardTitle>Wound Distribution</CardTitle>
+                    <CardDescription>
+                      {startDate && isSingleDate 
+                        ? `Proportion of wound types for ${format(startDate, 'MMM dd, yyyy')}`
+                        : startDate && endDate 
+                          ? `Proportion of wound types for ${format(startDate, 'MMM dd')} - ${format(endDate, 'MMM dd')}`
+                          : 'Proportion of wound types'}
+                    </CardDescription>
                     <div className="absolute top-4 right-4">
                         <DataSourceBadge source={dataSource} showLabel={false} />
                     </div>
                 </CardHeader>
                 <CardContent className="relative pl-2 pr-2">
-                    {isLoading ? (
-                        <EcgLoader title="Loading Visual Distribution..." minHeight="min-h-[330px]" />
+                    {isLoading && !data ? (
+                        <EcgLoader title="Loading Wound Distribution..." minHeight="min-h-[450px]" />
                     ) : (
-                        <div className="flex h-[330px] w-full gap-4 pl-1.25">
+                        <div className="flex h-[450px] w-full gap-2 pl-1">
                         {/* Legend on the left with scroll */}
-                        <div className="w-24 overflow-y-auto flex-shrink-0 py-8">
+                        <div className="w-20 overflow-y-auto flex-shrink-0 py-4">
                             <div className="space-y-2">
-                                {processedData.map((entry: any, index: number) => (
-                                    <div key={`legend-${index}`} className="flex items-center gap-2 whitespace-nowrap">
+                                {processedData.map((entry: any, index: number) => {
+                                    const isHidden = hiddenEtiologies.has(entry.name);
+                                    return (
                                         <div 
-                                            className="w-3 h-3 rounded-sm flex-shrink-0" 
-                                            style={{ backgroundColor: entry.fill }}
-                                        />
-                                        <span className="truncate text-xs">{entry.name}</span>
-                                    </div>
-                                ))}
+                                            key={`legend-${index}`} 
+                                            className="flex items-center gap-2 whitespace-nowrap cursor-pointer hover:bg-muted/50 rounded p-1 -m-1 transition-colors"
+                                            onClick={() => {
+                                                setHiddenEtiologies(prev => {
+                                                    const newSet = new Set(prev);
+                                                    if (newSet.has(entry.name)) {
+                                                        newSet.delete(entry.name);
+                                                    } else {
+                                                        newSet.add(entry.name);
+                                                    }
+                                                    return newSet;
+                                                });
+                                            }}
+                                        >
+                                            <div 
+                                                className="w-3 h-3 rounded-sm flex-shrink-0" 
+                                                style={{ backgroundColor: isHidden ? 'transparent' : entry.fill, border: isHidden ? `2px solid ${entry.stroke}` : `1px solid ${entry.stroke}` }}
+                                            />
+                                            <span className={`truncate text-xs ${isHidden ? 'line-through text-muted-foreground' : ''}`}>{entry.name}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                         {/* Chart */}
@@ -240,16 +363,44 @@ export default function EtiologyReport() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <Pie
-                                        data={processedData}
+                                        data={processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name))}
                                         cx="50%"
                                         cy="50%"
-                                        innerRadius={90}
-                                        outerRadius={135}
+                                        innerRadius={120}
+                                        outerRadius={190}
                                         paddingAngle={5}
                                         dataKey="value"
+                                        animationBegin={0}
+                                        animationDuration={800}
+                                        animationEasing="ease-out"
+                                        isAnimationActive={true}
+                                        onClick={(data, index) => {
+                                            if (data && data.name) {
+                                                setPressedEtiologyIndex(index);
+                                                setTimeout(() => {
+                                                    setPressedEtiologyIndex(null);
+                                                    setSelectedEtiology(data.name);
+                                                    setEtiologyModalOpen(true);
+                                                }, 150);
+                                            }
+                                        }}
+                                        style={{ cursor: 'pointer' }}
                                     >
-                                        {processedData.map((entry: any, index: number) => (
-                                            <Cell key={`cell-${index}`} fill={entry.fill} />
+                                        {processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name)).map((entry: any, index: number) => (
+                                            <Cell 
+                                                key={`cell-${index}`} 
+                                                fill={entry.fill}
+                                                stroke={entry.stroke}
+                                                strokeWidth={1}
+                                                style={{ 
+                                                    cursor: 'pointer',
+                                                    outline: 'none',
+                                                    transform: pressedEtiologyIndex === index ? 'scale(0.92)' : 'scale(1)',
+                                                    transformOrigin: 'center',
+                                                    transformBox: 'fill-box',
+                                                    transition: 'transform 0.15s ease-out'
+                                                }} 
+                                            />
                                         ))}
                                     </Pie>
                                     <Tooltip 
@@ -263,7 +414,9 @@ export default function EtiologyReport() {
                     )}
                 </CardContent>
             </Card>
+            )}
 
+            {isComponentEnabled('etiology-report', 'patterns') && (
             <Card>
             <CardHeader className="relative pb-2">
                 <CardTitle>Detailed Etiology Count</CardTitle>
@@ -283,7 +436,14 @@ export default function EtiologyReport() {
                 </TableHeader>
                 <TableBody>
                     {processedData.map((item: any) => (
-                    <TableRow key={item.name}>
+                    <TableRow 
+                        key={item.name} 
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => {
+                            setSelectedEtiology(item.name);
+                            setEtiologyModalOpen(true);
+                        }}
+                    >
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="text-right">{item.value}</TableCell>
                         <TableCell className="text-right">{item.percentage.toFixed(2)}%</TableCell>
@@ -298,8 +458,93 @@ export default function EtiologyReport() {
                 </Table>
             </CardContent>
             </Card>
+            )}
         </div>
       )}
+      
+      {/* Wounds by Etiology Modal */}
+      <WoundsByEtiologyModal
+        patients={woundsByEtiologyData?.data || []}
+        totalWounds={woundsByEtiologyData?.total_wounds || 0}
+        totalPatients={woundsByEtiologyData?.total_patients || 0}
+        etiology={selectedEtiology || ''}
+        facilityId={facilityId || ''}
+        isLoading={woundsByEtiologyLoading}
+        open={etiologyModalOpen}
+        onOpenChange={setEtiologyModalOpen}
+        onRefetch={refetchWoundsByEtiology}
+        startDate={startDateStr}
+        endDate={endDateStr}
+      />
     </div>
   );
+}
+
+function DatePicker({ 
+  date, 
+  setDate, 
+  label, 
+  enabledDates,
+  isLoading = false,
+  defaultMonth
+}: { 
+  date: Date | undefined, 
+  setDate: (d: Date | undefined) => void, 
+  label: string, 
+  enabledDates?: string[],
+  isLoading?: boolean,
+  defaultMonth?: Date
+}) {
+  const [open, setOpen] = useState(false);
+  
+  const enabledCount = enabledDates?.length ?? 0;
+  const dateInfo = enabledDates && enabledDates.length > 0 
+    ? `${enabledCount} date${enabledCount !== 1 ? 's' : ''} available`
+    : 'No dates available';
+
+  const handleDateSelect = (selectedDate: Date | undefined) => {
+    setDate(selectedDate);
+    if (selectedDate) {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant={"outline"}
+          className={cn(
+            "w-[228px] justify-start text-left font-normal",
+            !date && "text-muted-foreground",
+            isLoading && "opacity-60"
+          )}
+          disabled={isLoading}
+        >
+          <CalendarIcon className="mr-2 h-4 w-4" />
+          {isLoading ? (
+            <span className="animate-pulse">{label}...</span>
+          ) : (
+            date ? format(date, "PPP") : <span>{label}</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[288px] p-0" align="start">
+        <div className="p-3 border-b bg-muted/50 text-xs text-muted-foreground">
+          {dateInfo}
+        </div>
+        <Calendar
+          key={open ? 'open' : 'closed'}
+          mode="single"
+          selected={date}
+          onSelect={handleDateSelect}
+          initialFocus
+          enabledDates={enabledDates}
+          isLoading={isLoading}
+          defaultMonth={date || defaultMonth}
+          className="w-full"
+        />
+      </PopoverContent>
+    </Popover>
+  )
 }

@@ -23,9 +23,6 @@ export function FacilityInfoBanner() {
         <p className="text-sm font-semibold text-blue-900 dark:text-blue-100 truncate">
           {displayName}
         </p>
-        <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
-          {authInfo.entity || "User"} {authInfo.entityId && `• ID: ${authInfo.entityId}`}
-        </p>
       </div>
       {authInfo.email && (
         <div className="flex-shrink-0 text-right">

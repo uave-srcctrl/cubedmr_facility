@@ -1,0 +1,198 @@
+{
+	"info": {
+		"_postman_id": "c55ca176-b96e-4e5e-8129-305f3e696104",
+		"name": "BastionGPT API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "33533728"
+	},
+	"item": [
+		{
+			"name": "Transcription APIM Apis",
+			"item": [
+				{
+					"name": "Send Transcribe APIM Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "key",
+								"value": "<ENTER-API-KEY-HERE>",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"type": "file",
+									"src": "/C:/Users/Nirav Vikani/Downloads/files/react js wav.wav"
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api.bastiongpt.com/request/transcribe",
+							"protocol": "https",
+							"host": [
+								"api",
+								"bastiongpt",
+								"com"
+							],
+							"path": [
+								"request",
+								"transcribe"
+							],
+							"query": [
+								{
+									"key": "subscription-key",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transcribe File APIM Get Request",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "key",
+								"value": "",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://api.bastiongpt.com/get/transcribefile?transcriptId=1e83bfec-9082-4439-9329-99f7f4d49cbe",
+							"protocol": "https",
+							"host": [
+								"api",
+								"bastiongpt",
+								"com"
+							],
+							"path": [
+								"get",
+								"transcribefile"
+							],
+							"query": [
+								{
+									"key": "transcriptId",
+									"value": "1e83bfec-9082-4439-9329-99f7f4d49cbe"
+								},
+								{
+									"key": "subscription-key",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transcribe File APIM Post Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "key",
+								"value": "",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"transcriptId\": \"1e83bfec-9082-4439-9329-99f7f4d49cbe\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api.bastiongpt.com/get/transcribefile",
+							"protocol": "https",
+							"host": [
+								"api",
+								"bastiongpt",
+								"com"
+							],
+							"path": [
+								"get",
+								"transcribefile"
+							],
+							"query": [
+								{
+									"key": "subscription-key",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "TextToText",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "key",
+						"value": "<ENTER-API-KEY-HERE>",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"messages\": [\r\n        {\r\n            \"role\": \"user\",\r\n            \"content\": \"what is a typical blood pressure range?\"\r\n        }\r\n    ],\r\n    \"max_tokens\": 500,\r\n    \"temperature\": 0.2\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://api.bastiongpt.com/v1/ChatCompletion",
+					"protocol": "https",
+					"host": [
+						"api",
+						"bastiongpt",
+						"com"
+					],
+					"path": [
+						"v1",
+						"ChatCompletion"
+					],
+					"query": [
+						{
+							"key": "subscription-key",
+							"value": "",
+							"disabled": true
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
