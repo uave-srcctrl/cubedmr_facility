@@ -222,6 +222,7 @@ interface CriticalWound {
   Palliative: boolean;
   facility_acquired: boolean;
   critical_reason: string;
+  disposition?: string;
   encounter_history: Array<{
     id: number;
     dos: string;

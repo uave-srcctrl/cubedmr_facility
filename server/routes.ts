@@ -353,6 +353,39 @@ export async function registerRoutes(
       console.log("[/api/get] Remote payload keys:", Object.keys(remotePayload));
       console.log("[/api/get] About to send to backend - entity:", requestedEntity, "action in payload:", remotePayload.action, "id:", remotePayload.id);
 
+      // ============= INTERCEPT LOCAL-ONLY METHODS =============
+      // These methods don't exist on the remote server, so we process them locally
+      const localOnlyMethods = ["getWoundsByHealingStatus", "getWoundsByDisposition"];
+      if (requestedEntity === "FacilityDataCenter" && localOnlyMethods.includes(rest.method)) {
+        console.log(`[/api/get] Intercepting local-only method: ${rest.method}`);
+        try {
+          const localApiUrl = `http://localhost/get`;
+          const localResponse = await fetchWithTimeout(localApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(remotePayload),
+          });
+          
+          if (localResponse.ok) {
+            const localData = await localResponse.json();
+            console.log(`[/api/get] Local ${rest.method} response:`, JSON.stringify(localData).substring(0, 500));
+            return res.json(localData);
+          } else {
+            console.error(`[/api/get] Local ${rest.method} failed with status:`, localResponse.status);
+            return res.status(localResponse.status).json({ 
+              status: false, 
+              error: `Local API returned status ${localResponse.status}` 
+            });
+          }
+        } catch (localError) {
+          console.error(`[/api/get] Error calling local API for ${rest.method}:`, localError);
+          return res.status(500).json({ 
+            status: false, 
+            error: `Failed to process ${rest.method} locally: ${localError instanceof Error ? localError.message : 'Unknown error'}` 
+          });
+        }
+      }
+
       // For facility data queries, add the same tracking parameters that Flutter uses
       if (requestedEntity === "FacilityDataCenter" || requestedEntity === "Facility" || requestedEntity === "FacilitiesByProvider") {
         // Add deviceId if not already present

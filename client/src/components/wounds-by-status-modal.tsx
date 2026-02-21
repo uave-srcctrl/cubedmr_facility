@@ -493,7 +493,7 @@ export function WoundsByStatusModal({
                                   </Button>
                                 )}
                                 <div className="text-right text-sm">
-                                  {isActiveDisposition && history.length > 0 ? (
+                                  {(isActiveDisposition || statusType === "healingStatus") && history.length > 0 ? (
                                     <>
                                       <p className="text-muted-foreground">{history.length} encounter{history.length !== 1 ? "s" : ""}</p>
                                       <p className="text-xs text-muted-foreground">Since {formatDate(wound.start_date || wound.dos)}</p>
@@ -511,8 +511,8 @@ export function WoundsByStatusModal({
                           {/* Show wound metrics for healingStatus OR Active disposition */}
                           {(statusType === "healingStatus" || isActiveDisposition) && (
                             <CardContent className="pt-3 pb-3">
-                              {/* Selected Encounter Details - only for Active disposition with history */}
-                              {isActiveDisposition && history.length > 0 && (
+                              {/* Selected Encounter Details - only when there's history to navigate */}
+                              {(isActiveDisposition || statusType === "healingStatus") && history.length > 0 && (
                                 <div className="mb-4 pb-4 border-b">
                                   <div className="flex items-center justify-between mb-2">
                                     <div className="text-xs text-muted-foreground flex items-center gap-1">
@@ -616,8 +616,8 @@ export function WoundsByStatusModal({
                                 );
                               })()}
 
-                              {/* PUSH Score Bar - Only shows when there's exactly 1 push_score value (Active disposition only) */}
-                              {isActiveDisposition && wound.etiology?.toLowerCase().includes('pressure') && displayData.push_score != null && (() => {
+                              {/* PUSH Score Bar - Only shows when there's exactly 1 push_score value */}
+                              {(isActiveDisposition || statusType === "healingStatus") && wound.etiology?.toLowerCase().includes('pressure') && displayData.push_score != null && (() => {
                                 const encountersWithPush = history.filter(e => e.push_score != null);
                                 if (encountersWithPush.length >= 2) return null; // Chart will show instead
                                 
@@ -642,8 +642,8 @@ export function WoundsByStatusModal({
                                 );
                               })()}
 
-                              {/* PUSH Score Over Time Chart - Only for Pressure Ulcers with Active disposition */}
-                              {isActiveDisposition && history.length > 1 && wound.etiology?.toLowerCase().includes('pressure') && (() => {
+                              {/* PUSH Score Over Time Chart - For Pressure Ulcers */}
+                              {(isActiveDisposition || statusType === "healingStatus") && history.length > 1 && wound.etiology?.toLowerCase().includes('pressure') && (() => {
                                 // Filter encounters that have push_score
                                 const encountersWithPush = history.filter(e => e.push_score != null);
                                 if (encountersWithPush.length < 2) return null;
@@ -779,8 +779,8 @@ export function WoundsByStatusModal({
                                 </div>
                               );})()}
 
-                              {/* Change in Surface Area Over Time - Active disposition only */}
-                              {isActiveDisposition && history.length > 1 && (() => {
+                              {/* Change in Surface Area Over Time */}
+                              {(isActiveDisposition || statusType === "healingStatus") && history.length > 1 && (() => {
                                 const initialSurface = toNum(history[0]?.surface) || 1;
                                 const visibility = getVisibility(woundKey);
                                 
