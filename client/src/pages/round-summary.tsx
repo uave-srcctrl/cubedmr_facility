@@ -15,13 +15,16 @@ import { useSettings } from "@/hooks/use-settings";
 import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { usePersistedDates } from "@/hooks/use-persisted-dates";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { EcgLoader } from "@/components/ecg-loader";
 import { RoundSummaryWoundsModal, RoundSummaryWound } from "@/components/round-summary-wounds-modal";
 import { LOCAL_API } from "@/lib/api-config";
 import { cn, normalizeEtiology, getEtiologyColor } from "@/lib/utils";
 import { exportToExcel, exportTableToPDF, printElement } from "@/lib/export-utils";
+import { CHRONIC_WOUND_THRESHOLD_DAYS } from "@/lib/constants";
 
 export default function RoundSummary() {
   const { getAuthInfo, getSelectedFacility, getToken, getEmail } = useAuth();
@@ -29,6 +32,9 @@ export default function RoundSummary() {
   const authInfo = getAuthInfo();
   const token = getToken();
   const email = getEmail();
+  
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
   
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
@@ -44,7 +50,6 @@ export default function RoundSummary() {
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[RoundSummary] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
     });
     return unsubscribe;
@@ -54,22 +59,25 @@ export default function RoundSummary() {
   const [chronicWoundsModalOpen, setChronicWoundsModalOpen] = useState(false);
   const [deterioratingWoundsModalOpen, setDeterioratingWoundsModalOpen] = useState(false);
 
-  console.log('[RoundSummary] authInfo:', authInfo);
-  console.log('[RoundSummary] facilityId:', facilityId);
-  console.log('[RoundSummary] token present:', !!token);
-  console.log('[RoundSummary] email:', email);
+
 
   // Get enabled dates for this facility
   const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId || '');
 
-  // Calculate last encounter date from enabledDates
-  const lastEncounterDate = useMemo(() => {
+  // Calculate first and last encounter dates from enabledDates
+  const { firstEncounterDate, lastEncounterDate } = useMemo(() => {
     if (enabledDates && enabledDates.length > 0) {
-      const lastDateStr = enabledDates[enabledDates.length - 1];
-      const [year, month, day] = lastDateStr.split('-').map(Number);
-      return new Date(year, month - 1, day);
+      const sorted = [...enabledDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      const parseDate = (dateStr: string) => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      };
+      return {
+        firstEncounterDate: parseDate(sorted[0]),
+        lastEncounterDate: parseDate(sorted[sorted.length - 1])
+      };
     }
-    return undefined;
+    return { firstEncounterDate: undefined, lastEncounterDate: undefined };
   }, [enabledDates]);
 
   // Set initial date to last encounter date (only if no persisted date)
@@ -99,7 +107,6 @@ export default function RoundSummary() {
     queryKey: ['roundSummary', facilityId, selectedDateStr],
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      console.log('[RoundSummary] Query executing with facility:', facilityId, 'date:', selectedDateStr);
       const url = LOCAL_API.FACILITIES_LIST; // Uses /facility/api/get endpoint for entity/method calls
 
       const headers: Record<string, string> = {
@@ -131,7 +138,6 @@ export default function RoundSummary() {
       }
 
       const result = await response.json();
-      console.log('[RoundSummary] Received response:', result);
 
       // Handle different response formats
       if (result.status === false) {
@@ -158,6 +164,19 @@ export default function RoundSummary() {
     }
   }, [data, error, isLoading]);
 
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Woundcare Round Summary</h1>
+          <p className="text-muted-foreground">Summary of wound care rounds</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -167,7 +186,7 @@ export default function RoundSummary() {
             Summary of wound care rounds{selectedDate && ` for ${format(selectedDate, 'MMM dd, yyyy')}`}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-start gap-2">
           <div className="flex items-center gap-2">
             <DatePicker
               date={selectedDate}
@@ -187,6 +206,12 @@ export default function RoundSummary() {
               <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
             </Button>
           </div>
+          {/* Date Range Info */}
+          {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+            <p className="text-xs text-muted-foreground">
+              Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+            </p>
+          )}
           
           {/* Export Dropdown */}
           {data && Array.isArray(data) && data.length > 0 && (
@@ -216,7 +241,11 @@ export default function RoundSummary() {
                       { key: 'Facility Acquired', header: 'Fac. Acquired', width: 12 }
                     ];
                     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : 'all';
-                    exportToExcel(data, `WoundcareRoundSummary_${dateStr}`, 'Round Summary', columns);
+                    exportToExcel(data, `WoundcareRoundSummary_${dateStr}`, 'Round Summary', columns, {
+                      title: 'Woundcare Round Summary',
+                      subtitle: selectedDate ? `Date: ${format(selectedDate, 'MMM dd, yyyy')}` : undefined,
+                      logoUrl: '/logo.png'
+                    });
                   }}
                   className="gap-2 cursor-pointer"
                 >
@@ -226,20 +255,22 @@ export default function RoundSummary() {
                 <DropdownMenuItem
                   onClick={() => {
                     const columns = [
-                      { key: 'Patient Name', header: 'Patient' },
-                      { key: 'Location', header: 'Location' },
-                      { key: 'Etiology', header: 'Etiology' },
-                      { key: 'Size (cm)', header: 'Size' },
-                      { key: 'Progress', header: 'Progress' },
-                      { key: 'Disposition', header: 'Disposition' },
-                      { key: 'Duration (days)', header: 'Days' },
-                      { key: 'Facility Acquired', header: 'Fac.Acq.' }
+                      { key: 'Patient Name', header: 'Patient', width: 50 },
+                      { key: 'Location', header: 'Location', width: 35 },
+                      { key: 'Etiology', header: 'Etiology', width: 28 },
+                      { key: 'Size (cm)', header: 'Size', width: 30 },
+                      { key: 'Tx Plan', header: 'Tx Plan', width: 50 },
+                      { key: 'Frequency', header: 'Freq', width: 15 },
+                      { key: 'Progress', header: 'Progress', width: 22 },
+                      { key: 'Duration (days)', header: 'Days', width: 12 },
+                      { key: 'Facility Acquired', header: 'Fac.Acq.', width: 15 }
                     ];
                     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : 'all';
                     exportTableToPDF(data, columns, `WoundcareRoundSummary_${dateStr}`, {
                       title: 'Woundcare Round Summary',
                       subtitle: selectedDate ? `Date: ${format(selectedDate, 'MMM dd, yyyy')}` : undefined,
-                      orientation: 'landscape'
+                      orientation: 'landscape',
+                      logoUrl: '/logo.png'
                     });
                   }}
                   className="gap-2 cursor-pointer"
@@ -285,7 +316,7 @@ export default function RoundSummary() {
 
       {/* KPI Cards */}
       {isComponentEnabled('round-summary', 'summary-cards') && data && Array.isArray(data) && data.length > 0 && (() => {
-        const chronicWoundsList = data.filter((item: any) => item['Duration (days)'] > 100);
+        const chronicWoundsList = data.filter((item: any) => item['Duration (days)'] > CHRONIC_WOUND_THRESHOLD_DAYS);
         const deterioratingWoundsList = data.filter((item: any) => 
           item['Progress'] === 'Deteriorating' || item['Progress'] === 'Deteriorated'
         );
@@ -387,14 +418,22 @@ export default function RoundSummary() {
                 <TableBody>
                   {data.map((item: any, index: number) => {
                     const size = item['Size (cm)'] || '';
-                    const [length, width, depth] = size.split('x').map((v: string) => v?.trim() || '-');
+                    const [lengthRaw, widthRaw, depthRaw] = size.split('x').map((v: string) => v?.trim() || '-');
+                    const formatDim = (val: string) => {
+                      if (val === '-' || val === '') return '-';
+                      const num = parseFloat(val);
+                      return isNaN(num) ? val : num.toFixed(2);
+                    };
+                    const length = formatDim(lengthRaw);
+                    const width = formatDim(widthRaw);
+                    const depth = formatDim(depthRaw);
                     const progress = item['Progress'] || 'N/A';
                     const progressColor = 
                       progress === 'Improving' ? 'bg-green-100 text-green-800 hover:bg-green-100' :
                       progress === 'Stable' ? 'bg-blue-100 text-blue-800 hover:bg-blue-100' :
                       (progress === 'Deteriorating' || progress === 'Deteriorated') ? 'bg-red-100 text-red-800 hover:bg-red-100' :
                       'bg-gray-100 text-gray-800 hover:bg-gray-100';
-                    const isChronic = item['Duration (days)'] > 100;
+                    const isChronic = item['Duration (days)'] > CHRONIC_WOUND_THRESHOLD_DAYS;
                     return (
                       <TableRow key={index}>
                         <TableCell className="font-medium">{item['Patient Name'] || 'N/A'}</TableCell>
@@ -457,7 +496,7 @@ export default function RoundSummary() {
 
       {/* Chronic Wounds Modal */}
       <RoundSummaryWoundsModal
-        wounds={data && Array.isArray(data) ? data.filter((item: RoundSummaryWound) => item['Duration (days)'] > 100) : []}
+        wounds={data && Array.isArray(data) ? data.filter((item: RoundSummaryWound) => item['Duration (days)'] > CHRONIC_WOUND_THRESHOLD_DAYS) : []}
         type="chronic"
         open={chronicWoundsModalOpen}
         onOpenChange={setChronicWoundsModalOpen}

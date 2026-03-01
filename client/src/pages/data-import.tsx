@@ -38,6 +38,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useSettings } from '@/hooks/use-settings';
 import { useAuth } from '@/hooks/use-auth';
+import { useImport } from '@/contexts/import-context';
 import { createSampleExcel, validateExcelData, remapExcelColumns } from '@/lib/excel-utils';
 import { dispatchAuthEvent, AUTH_EVENTS } from '@/lib/auth-events';
 
@@ -182,7 +183,7 @@ const FILE_FORMATS: FileFormat[] = [
 
 export default function DataImportPage() {
   const { isComponentEnabled } = useSettings();
-  const { getSelectedFacility, getSelectedFacilityInfo, isFacilitySelected } = useAuth();
+  const { getSelectedFacility, getSelectedFacilityInfo, isFacilitySelected, getFacilities } = useAuth();
   const [, navigate] = useLocation();
   const [selectedFormat, setSelectedFormat] = useState<string>('excel');
   const [files, setFiles] = useState<File[]>([]);
@@ -206,8 +207,25 @@ export default function DataImportPage() {
   } | null>(null);
   const [showFacilityMismatchModal, setShowFacilityMismatchModal] = useState(false);
   const [pendingMismatchFile, setPendingMismatchFile] = useState<File | null>(null);
+  // Directory mismatch handling - multiple files
+  const [pendingMismatchFiles, setPendingMismatchFiles] = useState<Array<{
+    file: File;
+    pdfFacilityName: string;
+  }>>([]);
+  const [showDirectoryMismatchModal, setShowDirectoryMismatchModal] = useState(false);
+  const [showNavigationWarning, setShowNavigationWarning] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { setImporting, setImportProgress } = useImport();
+  
+  // Sync local processing state with global import context
+  useEffect(() => {
+    setImporting(isProcessing);
+  }, [isProcessing, setImporting]);
+  
+  useEffect(() => {
+    setImportProgress(progress);
+  }, [progress, setImportProgress]);
   
   // Check if facility is selected
   const hasFacilitySelected = isFacilitySelected();
@@ -233,6 +251,24 @@ export default function DataImportPage() {
       setSelectedFormat(enabledFormats[0].id);
     }
   }, [isComponentEnabled, selectedFormat]);
+
+  // Block navigation when import is in progress
+  useEffect(() => {
+    if (!isProcessing) return;
+
+    // Handle browser close/refresh
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Import in progress. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isProcessing]);
 
   const currentFormat = FILE_FORMATS.find(f => f.id === selectedFormat);
 
@@ -346,33 +382,19 @@ export default function DataImportPage() {
 
       const result = await response.json();
 
-      // Handle facility mismatch error specially - show modal for user decision
+      // Handle facility mismatch - show warning modal for user decision
       if (result.error_type === 'facility_mismatch') {
         setFacilityMismatchError({
           pdfFacilityName: result.pdf_facility_name || 'Unknown',
           selectedFacilityName: result.selected_facility_name || 'Unknown',
         });
         
-        // Store the file for potential re-import if user confirms
+        // Store the file for re-import when user confirms
         setPendingMismatchFile(file);
         
         // Show preview data
         const processedData: ImportRow[] = result.preview || [];
         setPreviewData(processedData.slice(0, 50));
-        
-        setImportResult({
-          success: false,
-          message: result.error,
-          data: processedData,
-          errors: [result.error],
-          fileErrors: [{
-            filename: file.name,
-            error: result.error,
-            errorType: 'facility_mismatch',
-            details: `PDF facility: ${result.pdf_facility_name || 'Unknown'}, Selected: ${result.selected_facility_name || 'Unknown'}`
-          }],
-          records_found: result.records_found,
-        });
         
         // Show the facility mismatch modal
         setShowFacilityMismatchModal(true);
@@ -450,7 +472,11 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
-      // Clear persisted dates so pages use new date range
+      queryClient.invalidateQueries({ queryKey: ['import-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['import-stats'] });
+      // Refresh facilities first to update total_wound_encounters count
+      await getFacilities().catch(console.error);
+      // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
       setProgress(100);
@@ -652,13 +678,41 @@ export default function DataImportPage() {
     const result = await response.json();
 
     if (!response.ok || !result.success) {
-      // Create error with additional metadata
-      const error = new Error(result.error || 'Error processing file') as Error & { errorType?: string; details?: string };
+      // Create error with additional metadata for mismatch detection
+      const error = new Error(result.error || 'Error processing file') as Error & { errorType?: string; details?: string; pdfFacilityName?: string };
       error.errorType = result.error_type || 'processing_error';
       if (result.pdf_facility_name) {
         error.details = `PDF facility: ${result.pdf_facility_name}, Selected: ${result.selected_facility_name || 'none'}`;
+        error.pdfFacilityName = result.pdf_facility_name;
       }
       throw error;
+    }
+
+    return {
+      data: result.preview || [],
+      errors: result.errors || [],
+      recordsInserted: result.records_inserted || 0,
+      recordsSkipped: result.records_skipped_duplicates || 0,
+    };
+  };
+
+  // Helper function to process single PDF with force_facility flag
+  const processSinglePdfWithForce = async (file: File): Promise<{ data: ImportRow[], errors: string[], recordsInserted: number, recordsSkipped: number }> => {
+    const formData = new FormData();
+    formData.append('pdf', file);
+    formData.append('facility_id', currentFacilityId ? String(currentFacilityId) : '0');
+    formData.append('imported_by', localStorage.getItem('userEmail') || 'web-import');
+    formData.append('force_facility', '1');
+
+    const response = await fetch('/api/endpoints/pdf-import.php', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Error processing file');
     }
 
     return {
@@ -677,6 +731,7 @@ export default function DataImportPage() {
     const allData: ImportRow[] = [];
     const allErrors: string[] = [];
     const fileErrors: FileError[] = [];
+    const mismatchedFiles: Array<{ file: File; pdfFacilityName: string }> = [];
     let totalRecordsInserted = 0;
     let totalRecordsSkipped = 0;
     let filesProcessed = 0;
@@ -712,14 +767,24 @@ export default function DataImportPage() {
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         const errorType = error?.errorType || 'processing_error';
-        allErrors.push(`${file.name}: ${errorMsg}`);
-        fileErrors.push({
-          filename: file.name,
-          error: errorMsg,
-          errorType: errorType,
-          details: error?.details
-        });
-        filesWithErrors++;
+        
+        // Check if this is a facility mismatch - collect for batch confirmation
+        if (errorType === 'facility_mismatch' && error?.pdfFacilityName) {
+          mismatchedFiles.push({
+            file,
+            pdfFacilityName: error.pdfFacilityName
+          });
+          // Don't count as error yet - user may confirm import later
+        } else {
+          allErrors.push(`${file.name}: ${errorMsg}`);
+          fileErrors.push({
+            filename: file.name,
+            error: errorMsg,
+            errorType: errorType,
+            details: error?.details
+          });
+          filesWithErrors++;
+        }
       }
     }
 
@@ -728,9 +793,24 @@ export default function DataImportPage() {
     // Build result message
     let message = '';
     if (format === 'pdf' || format === 'word') {
-      message = `Processed ${filesProcessed} of ${fileList.length} files. ${totalRecordsInserted} records imported`;
-      if (totalRecordsSkipped > 0) {
-        message += `, ${totalRecordsSkipped} duplicates skipped`;
+      // When there are mismatched files pending confirmation, focus on that message
+      // instead of showing confusing "Processed 0 of X files. 0 records imported"
+      if (mismatchedFiles.length > 0 && filesProcessed === 0) {
+        // Only mismatches, no successfully processed files yet
+        message = `${mismatchedFiles.length} file(s) with facility mismatch pending confirmation`;
+      } else if (mismatchedFiles.length > 0) {
+        // Some processed, some mismatched
+        message = `Processed ${filesProcessed} file(s). ${totalRecordsInserted} records imported`;
+        if (totalRecordsSkipped > 0) {
+          message += `, ${totalRecordsSkipped} duplicates skipped`;
+        }
+        message += `. ${mismatchedFiles.length} file(s) with facility mismatch pending confirmation`;
+      } else {
+        // No mismatches - normal message
+        message = `Processed ${filesProcessed} of ${fileList.length} files. ${totalRecordsInserted} records imported`;
+        if (totalRecordsSkipped > 0) {
+          message += `, ${totalRecordsSkipped} duplicates skipped`;
+        }
       }
       if (filesWithErrors > 0) {
         message += `. ${filesWithErrors} file(s) had errors`;
@@ -743,7 +823,7 @@ export default function DataImportPage() {
     }
     
     setImportResult({
-      success: allErrors.length === 0,
+      success: allErrors.length === 0 && mismatchedFiles.length === 0,
       message,
       data: allData,
       errors: allErrors,
@@ -753,8 +833,16 @@ export default function DataImportPage() {
     setPreviewData(allData.slice(0, 50));
     setIsProcessing(false);
     
-    // Show summary toast
-    if (allErrors.length === 0) {
+    // If there are mismatched files, show the directory mismatch modal
+    if (mismatchedFiles.length > 0) {
+      setPendingMismatchFiles(mismatchedFiles);
+      setShowDirectoryMismatchModal(true);
+      toast({
+        title: 'Facility Mismatch Detected',
+        description: `${mismatchedFiles.length} file(s) have different facility names. Review and confirm to proceed.`,
+        variant: 'default',
+      });
+    } else if (allErrors.length === 0) {
       toast({
         title: 'Import completed successfully',
         description: message,
@@ -773,7 +861,11 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
-      // Clear persisted dates so pages use new date range
+      queryClient.invalidateQueries({ queryKey: ['import-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['import-stats'] });
+      // Refresh facilities first to update total_wound_encounters count
+      await getFacilities().catch(console.error);
+      // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
     }
   };
@@ -945,7 +1037,11 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
-      // Clear persisted dates so pages use new date range
+      queryClient.invalidateQueries({ queryKey: ['import-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['import-stats'] });
+      // Refresh facilities first to update total_wound_encounters count
+      await getFacilities().catch(console.error);
+      // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
     } catch (error) {
@@ -977,6 +1073,7 @@ export default function DataImportPage() {
     setShowValidation(false);
     setFacilityMismatchError(null);
     setPendingMismatchFile(null);
+    setPendingMismatchFiles([]);
   };
 
   // Handle facility mismatch modal cancel - reset import screen
@@ -1073,7 +1170,11 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
-      // Clear persisted dates so pages use new date range
+      queryClient.invalidateQueries({ queryKey: ['import-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['import-stats'] });
+      // Refresh facilities first to update total_wound_encounters count
+      await getFacilities().catch(console.error);
+      // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
     } catch (error) {
@@ -1093,6 +1194,104 @@ export default function DataImportPage() {
     } finally {
       setIsProcessing(false);
       setProgress(100);
+    }
+  };
+
+  // Handle directory mismatch modal cancel
+  const handleDirectoryMismatchCancel = () => {
+    setShowDirectoryMismatchModal(false);
+    setPendingMismatchFiles([]);
+    toast({
+      title: 'Mismatched Files Skipped',
+      description: `${pendingMismatchFiles.length} file(s) were not imported due to facility mismatch`,
+    });
+  };
+
+  // Handle directory mismatch modal confirm - import all mismatched files at user's discretion
+  const handleDirectoryMismatchConfirm = async () => {
+    setShowDirectoryMismatchModal(false);
+    
+    if (pendingMismatchFiles.length === 0 || !currentFacilityId) {
+      toast({
+        title: 'Error',
+        description: 'No files pending or facility not selected',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    setProgress(0);
+
+    let totalInserted = 0;
+    let totalSkipped = 0;
+    let filesProcessed = 0;
+    let filesWithErrors = 0;
+    const allData: ImportRow[] = [];
+    const errors: string[] = [];
+
+    try {
+      for (let i = 0; i < pendingMismatchFiles.length; i++) {
+        const { file } = pendingMismatchFiles[i];
+        const fileProgress = ((i + 1) / pendingMismatchFiles.length) * 100;
+        setProgress(fileProgress);
+
+        try {
+          const result = await processSinglePdfWithForce(file);
+          allData.push(...result.data);
+          totalInserted += result.recordsInserted;
+          totalSkipped += result.recordsSkipped;
+          filesProcessed++;
+        } catch (error: any) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          errors.push(`${file.name}: ${errorMsg}`);
+          filesWithErrors++;
+        }
+      }
+
+      setProgress(100);
+
+      const message = `Processed ${filesProcessed} mismatched files. ${totalInserted} records imported${totalSkipped > 0 ? `, ${totalSkipped} duplicates skipped` : ''}${filesWithErrors > 0 ? `. ${filesWithErrors} file(s) had errors` : ''}`;
+
+      // Update import result
+      setImportResult(prev => ({
+        ...prev,
+        success: filesWithErrors === 0,
+        message: prev?.message ? `${prev.message}. ${message}` : message,
+        data: [...(prev?.data || []), ...allData],
+        errors: [...(prev?.errors || []), ...errors],
+      }));
+
+      setPreviewData(prev => [...prev, ...allData.slice(0, 20)]);
+
+      toast({
+        title: 'Mismatched Files Imported',
+        description: `${totalInserted} records imported to ${currentFacilityInfo?.name || 'selected facility'} at your discretion.`,
+        className: filesWithErrors === 0 ? 'bg-green-500 text-white border-green-600' : undefined,
+        variant: filesWithErrors > 0 ? 'destructive' : 'default',
+      });
+
+      // Refresh caches
+      queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
+      queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
+      queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
+      queryClient.invalidateQueries({ queryKey: ['import-logs'] });
+      queryClient.invalidateQueries({ queryKey: ['import-stats'] });
+      // Refresh facilities first to update total_wound_encounters count
+      await getFacilities().catch(console.error);
+      // Then dispatch event so pages know to refresh (after facilities are updated)
+      dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: 'Import Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessing(false);
+      setPendingMismatchFiles([]);
     }
   };
 
@@ -1161,7 +1360,13 @@ export default function DataImportPage() {
       {!hasFacilitySelected && (
         <Button
           variant="ghost"
-          onClick={() => navigate('/facility-selector')}
+          onClick={() => {
+            if (isProcessing) {
+              setShowNavigationWarning(true);
+            } else {
+              navigate('/facility-selector');
+            }
+          }}
           className="mb-2 text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -1263,44 +1468,7 @@ export default function DataImportPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Facility Mode Indicator */}
-            {(selectedFormat === 'pdf' || selectedFormat === 'word') && (
-              <Alert className={currentFacilityId ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950' : 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950'}>
-                <Info className={`h-4 w-4 ${currentFacilityId ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`} />
-                <AlertTitle className={currentFacilityId ? 'text-blue-800 dark:text-blue-200' : 'text-green-800 dark:text-green-200'}>
-                  {currentFacilityId 
-                    ? `Facility: ${currentFacilityInfo?.name || currentFacilityId}` 
-                    : 'Auto-Facility Mode'}
-                </AlertTitle>
-                <AlertDescription className={currentFacilityId ? 'text-blue-700 dark:text-blue-300' : 'text-green-700 dark:text-green-300'}>
-                  {currentFacilityId 
-                    ? `Only data matching "${currentFacilityInfo?.name || 'this facility'}" will be imported.`
-                    : 'The facility will be automatically detected from the PDF. If it does not exist, it will be created.'}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {/* Facility Mismatch Info - shows only when modal is closed but mismatch exists */}
-            {facilityMismatchError && !showFacilityMismatchModal && (
-              <Alert variant="default" className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <AlertTitle className="text-amber-800 dark:text-amber-200">Facility Mismatch Detected</AlertTitle>
-                <AlertDescription className="text-amber-700 dark:text-amber-300">
-                  <p className="mb-2">
-                    The PDF contains data for <strong>"{facilityMismatchError.pdfFacilityName}"</strong>, 
-                    but you have selected <strong>"{facilityMismatchError.selectedFacilityName}"</strong>.
-                  </p>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => setShowFacilityMismatchModal(true)}
-                    className="mt-2 border-amber-300 text-amber-700 hover:bg-amber-100"
-                  >
-                    Review Import Options
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            )}
+            {/* Facility Mismatch Info - DISABLED: force_facility is always true now */}
 
             {/* Dropzone */}
             <div
@@ -1912,6 +2080,98 @@ export default function DataImportPage() {
               className="bg-amber-600 hover:bg-amber-700"
             >
               Proceed at My Discretion
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Directory Facility Mismatch Modal - for batch imports */}
+      <AlertDialog open={showDirectoryMismatchModal} onOpenChange={setShowDirectoryMismatchModal}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Directory Import: Facility Mismatch Warning
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-4 text-sm text-muted-foreground">
+                <p>
+                  {pendingMismatchFiles.length} file(s) contain data for different facilities:
+                </p>
+                <div className="max-h-48 overflow-y-auto border rounded-lg divide-y">
+                  {pendingMismatchFiles.map((mismatch, idx) => (
+                    <div key={idx} className="p-2 flex items-center justify-between text-xs">
+                      <span className="font-medium truncate max-w-[200px]" title={mismatch.file.name}>
+                        {mismatch.file.name}
+                      </span>
+                      <span className="text-red-600 dark:text-red-400">
+                        {mismatch.pdfFacilityName}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-50 dark:bg-red-950 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                    <p className="text-xs text-red-600 dark:text-red-400 mb-1">PDF Facilities</p>
+                    <p className="font-semibold text-red-700 dark:text-red-300 text-sm">
+                      {[...new Set(pendingMismatchFiles.map(m => m.pdfFacilityName))].join(', ')}
+                    </p>
+                  </div>
+                  <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">Target Facility</p>
+                    <p className="font-semibold text-blue-700 dark:text-blue-300 text-sm">
+                      {currentFacilityInfo?.name || 'Selected Facility'}
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-950 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <p className="text-amber-700 dark:text-amber-300 font-medium mb-2">
+                    Do you want to import all {pendingMismatchFiles.length} mismatched files?
+                  </p>
+                  <ul className="list-disc list-inside text-xs space-y-1 text-amber-600 dark:text-amber-400">
+                    <li>All data will be imported to <strong>{currentFacilityInfo?.name || 'selected facility'}</strong></li>
+                    <li>This action is at your discretion and responsibility</li>
+                    <li>Cancel to skip these files</li>
+                  </ul>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleDirectoryMismatchCancel}>
+              Skip These Files
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDirectoryMismatchConfirm}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              Import All at My Discretion
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Navigation Warning Modal */}
+      <AlertDialog open={showNavigationWarning} onOpenChange={setShowNavigationWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Import in Progress
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              An import is currently in progress. Leaving this page will cancel the import and may result in incomplete data.
+              <br /><br />
+              <strong>Files processed: {progress.toFixed(0)}%</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay on Page</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => navigate('/')}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Leave Anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

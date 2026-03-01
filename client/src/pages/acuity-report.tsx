@@ -18,7 +18,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSettings } from "@/hooks/use-settings";
 import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { EcgLoader } from "@/components/ecg-loader";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { LOCAL_API } from "@/lib/api-config";
@@ -27,6 +29,9 @@ import { usePersistedDates } from "@/hooks/use-persisted-dates";
 export default function AcuityReport() {
   const { getToken, getSelectedFacility } = useAuth();
   const { isComponentEnabled } = useSettings();
+  
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
   
   // Get initial facility ID from storage/auth - don't use hardcoded fallback
   const getInitialFacilityId = () => {
@@ -68,18 +73,22 @@ export default function AcuityReport() {
   console.log("[AcuityReport] Enabled dates:", enabledDates);
   console.log("[AcuityReport] enabledDatesLoading:", enabledDatesLoading);
   
-  // Calculate last encounter date directly from enabledDates (which is already sorted)
-  // This is the most reliable source since it comes from the same backend that provides the dates
-  const lastEncounterDate = useMemo(() => {
+  // Calculate first and last encounter dates from enabledDates
+  const { firstEncounterDate, lastEncounterDate } = useMemo(() => {
     if (enabledDates && enabledDates.length > 0) {
-      const lastDateStr = enabledDates[enabledDates.length - 1];
-      const [year, month, day] = lastDateStr.split('-').map(Number);
-      const date = new Date(year, month - 1, day);
-      console.log("[AcuityReport] lastEncounterDate from enabledDates:", lastDateStr, "->", date);
-      return date;
+      const sorted = [...enabledDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      const parseDate = (dateStr: string) => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      };
+      console.log("[AcuityReport] Date range from enabledDates:", sorted[0], "to", sorted[sorted.length - 1]);
+      return {
+        firstEncounterDate: parseDate(sorted[0]),
+        lastEncounterDate: parseDate(sorted[sorted.length - 1])
+      };
     }
-    console.log("[AcuityReport] No enabledDates available, lastEncounterDate is undefined");
-    return undefined;
+    console.log("[AcuityReport] No enabledDates available");
+    return { firstEncounterDate: undefined, lastEncounterDate: undefined };
   }, [enabledDates]);
   
   // Set initial date to last encounter date (from enabledDates)
@@ -272,6 +281,19 @@ export default function AcuityReport() {
     console.log('[AcuityReport] ⚠️  No data available, will show mock data');
   }
 
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Acuity Index</h1>
+          <p className="text-muted-foreground mt-1">Measurement of wound care complexity and patient load</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -280,18 +302,26 @@ export default function AcuityReport() {
             <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Acuity Index</h1>
             <p className="text-muted-foreground mt-1">Measurement of wound care complexity and patient load</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <DateRangePicker 
-              date={selectedDate} 
-              setDate={setSelectedDate} 
-              label="Select Date" 
-              enabledDates={enabledDates}
-              isLoading={enabledDatesLoading}
-              defaultMonth={defaultMonth}
-            />
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
+          <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DateRangePicker 
+                date={selectedDate} 
+                setDate={setSelectedDate} 
+                label="Select Date" 
+                enabledDates={enabledDates}
+                isLoading={enabledDatesLoading}
+                defaultMonth={defaultMonth}
+              />
+              <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+                <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+            </div>
+            {/* Date Range Info */}
+            {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+              <p className="text-xs text-muted-foreground mt-[5px]">
+                Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+              </p>
+            )}
           </div>
         </div>
       </div>

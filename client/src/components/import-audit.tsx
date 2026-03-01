@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -52,8 +52,14 @@ import {
   User,
   Building,
   Loader2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { useLocation } from 'wouter';
+import { dispatchAuthEvent, AUTH_EVENTS } from '@/lib/auth-events';
 
 interface ImportLog {
   id: number;
@@ -72,7 +78,7 @@ interface ImportLog {
   records_duplicated: number;
   ai_provider: string | null;
   ai_processing_time_ms: number | null;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'partial' | 'reverted';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'partial' | 'reverted' | 'duplicated';
   started_at: string | null;
   completed_at: string | null;
   processing_duration_ms: number | null;
@@ -88,6 +94,7 @@ interface ImportStats {
   successful_imports: number;
   failed_imports: number;
   reverted_imports: number;
+  duplicated_imports: number;
   avg_processing_time_ms: number | null;
   last_import_date: string | null;
 }
@@ -123,6 +130,11 @@ const statusConfig = {
     color: 'bg-purple-100 text-purple-800',
     label: 'Reverted',
   },
+  duplicated: {
+    icon: AlertTriangle,
+    color: 'bg-orange-100 text-orange-800',
+    label: 'Duplicated',
+  },
 };
 
 const sourceTypeIcons: Record<string, React.ElementType> = {
@@ -132,6 +144,10 @@ const sourceTypeIcons: Record<string, React.ElementType> = {
   Word: FileText,
 };
 
+// Sortable columns type
+type SortColumn = 'import_date' | 'original_filename' | 'facility_name' | 'records_inserted' | 'status' | 'processing_duration_ms';
+type SortDirection = 'asc' | 'desc';
+
 export default function ImportAudit() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -139,9 +155,13 @@ export default function ImportAudit() {
   const [showRevertDialog, setShowRevertDialog] = useState(false);
   const [importToRevert, setImportToRevert] = useState<ImportLog | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [sortColumn, setSortColumn] = useState<SortColumn>('import_date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { getFacilities, getSelectedFacility, getAvailableFacilities } = useAuth();
+  const [, setLocation] = useLocation();
 
   // Fetch import logs
   const {
@@ -181,17 +201,27 @@ export default function ImportAudit() {
   // Revert import mutation
   const revertMutation = useMutation({
     mutationFn: async (importId: string) => {
+      console.log('[ImportAudit] Attempting to revert import:', importId);
       const response = await fetch(
         `/api/import-audit?import_id=${importId}`,
         { method: 'DELETE' }
       );
+      console.log('[ImportAudit] Revert response status:', response.status);
       if (!response.ok) {
         const error = await response.json();
+        console.error('[ImportAudit] Revert HTTP error:', error);
         throw new Error(error.error || 'Failed to revert import');
       }
-      return response.json();
+      const data = await response.json();
+      console.log('[ImportAudit] Revert response data:', data);
+      // Also check for success: false in response body
+      if (data.success === false) {
+        console.error('[ImportAudit] Revert returned success=false:', data);
+        throw new Error(data.error || 'Failed to revert import');
+      }
+      return data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       toast({
         title: 'Import Reverted',
         description: data.message || 'The import has been successfully reverted.',
@@ -204,18 +234,88 @@ export default function ImportAudit() {
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
       setShowRevertDialog(false);
       setImportToRevert(null);
+      
+      // Refresh facilities to update total_wound_encounters count
+      try {
+        await getFacilities();
+        // Dispatch event so all pages refresh their data
+        dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
+        
+        // Check if current facility has no more data
+        const selectedFacilityId = getSelectedFacility();
+        const facilities = getAvailableFacilities();
+        const currentFacility = facilities.find(f => String(f.id) === String(selectedFacilityId));
+        const totalEncounters = currentFacility?.total_wound_encounters ?? currentFacility?.totalWoundEncounters ?? 0;
+        
+        if (totalEncounters === 0) {
+          // Navigate to dashboard which will show No Data Available
+          setLocation('/facility/');
+        }
+      } catch (err) {
+        console.error('[ImportAudit] Failed to refresh facilities:', err);
+      }
     },
     onError: (error: Error) => {
+      console.error('[ImportAudit] Revert mutation error:', error);
       toast({
         title: 'Revert Failed',
         description: error.message,
         variant: 'destructive',
       });
+      // Close dialog on error too
+      setShowRevertDialog(false);
+      setImportToRevert(null);
     },
   });
 
   const logs: ImportLog[] = logsResponse?.data || [];
   const stats: ImportStats | null = statsResponse?.data || null;
+
+  // Sort logs based on current sort column and direction
+  const sortedLogs = useMemo(() => {
+    return [...logs].sort((a, b) => {
+      const multiplier = sortDirection === 'asc' ? 1 : -1;
+      
+      switch (sortColumn) {
+        case 'import_date':
+          return multiplier * (new Date(a.import_date).getTime() - new Date(b.import_date).getTime());
+        case 'original_filename':
+          return multiplier * ((a.original_filename || '').localeCompare(b.original_filename || ''));
+        case 'facility_name':
+          return multiplier * ((a.facility_name || '').localeCompare(b.facility_name || ''));
+        case 'records_inserted':
+          return multiplier * (a.records_inserted - b.records_inserted);
+        case 'status':
+          return multiplier * a.status.localeCompare(b.status);
+        case 'processing_duration_ms':
+          return multiplier * ((a.processing_duration_ms || 0) - (b.processing_duration_ms || 0));
+        default:
+          return 0;
+      }
+    });
+  }, [logs, sortColumn, sortDirection]);
+
+  // Handle column header click for sorting
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      // Toggle direction if same column
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New column, default to descending for date, ascending for others
+      setSortColumn(column);
+      setSortDirection(column === 'import_date' ? 'desc' : 'asc');
+    }
+  };
+
+  // Get sort icon for column header
+  const getSortIcon = (column: SortColumn) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="ml-1 h-3 w-3" />
+      : <ArrowDown className="ml-1 h-3 w-3" />;
+  };
 
   const toggleRowExpanded = (importId: string) => {
     const newExpanded = new Set(expandedRows);
@@ -271,7 +371,7 @@ export default function ImportAudit() {
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -327,6 +427,20 @@ export default function ImportAudit() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Duplicated</p>
+                <p className="text-2xl font-bold text-orange-600">
+                  {isLoadingStats ? '-' : stats?.duplicated_imports || 0}
+                </p>
+              </div>
+              <AlertTriangle className="h-8 w-8 text-orange-500" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -354,6 +468,7 @@ export default function ImportAudit() {
                   <SelectItem value="partial">Partial</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
                   <SelectItem value="reverted">Reverted</SelectItem>
+                  <SelectItem value="duplicated">Duplicated</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -411,18 +526,66 @@ export default function ImportAudit() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>File</TableHead>
-                    <TableHead>Facility</TableHead>
-                    <TableHead className="text-center">Records</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Duration</TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('import_date')}
+                    >
+                      <div className="flex items-center">
+                        Date
+                        {getSortIcon('import_date')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('original_filename')}
+                    >
+                      <div className="flex items-center">
+                        File
+                        {getSortIcon('original_filename')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('facility_name')}
+                    >
+                      <div className="flex items-center">
+                        Facility
+                        {getSortIcon('facility_name')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="text-center cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('records_inserted')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Records
+                        {getSortIcon('records_inserted')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('status')}
+                    >
+                      <div className="flex items-center">
+                        Status
+                        {getSortIcon('status')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('processing_duration_ms')}
+                    >
+                      <div className="flex items-center">
+                        Duration
+                        {getSortIcon('processing_duration_ms')}
+                      </div>
+                    </TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   <AnimatePresence>
-                    {logs.map((log) => {
+                    {sortedLogs.map((log) => {
                       const StatusIcon = statusConfig[log.status]?.icon || AlertTriangle;
                       const statusColor = statusConfig[log.status]?.color || 'bg-gray-100';
                       const SourceIcon = sourceTypeIcons[log.source_type] || FileSpreadsheet;
@@ -488,17 +651,20 @@ export default function ImportAudit() {
                             <TableCell>
                               {formatDuration(log.processing_duration_ms)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 variant="ghost"
                                 size="sm"
+                                onMouseDown={(e) => e.stopPropagation()}
                                 onClick={(e) => {
+                                  e.preventDefault();
                                   e.stopPropagation();
+                                  console.log('[ImportAudit] Revert button clicked for:', log.import_id, 'records_inserted:', log.records_inserted, 'type:', typeof log.records_inserted);
                                   handleRevertClick(log);
                                 }}
                                 disabled={
                                   log.status === 'reverted' ||
-                                  log.records_inserted === 0
+                                  Number(log.records_inserted) === 0
                                 }
                                 className="text-destructive hover:text-destructive"
                               >

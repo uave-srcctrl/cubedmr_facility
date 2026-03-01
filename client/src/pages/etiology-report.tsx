@@ -18,7 +18,9 @@ import { useWoundsByEtiology } from "@/hooks/use-patients";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { usePersistedDates } from "@/hooks/use-persisted-dates";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { WoundsByEtiologyModal } from "@/components/wounds-by-etiology-modal";
 import { LOCAL_API } from "@/lib/api-config";
 import { normalizeFieldNamesArray } from "@/lib/field-mapper";
@@ -45,6 +47,9 @@ interface EtiologyItem {
 export default function EtiologyReport() {
   const { getToken, getSelectedFacility } = useAuth();
   const { isComponentEnabled } = useSettings();
+  
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
   
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
@@ -117,23 +122,16 @@ export default function EtiologyReport() {
     return 'grid gap-6 lg:grid-cols-2';
   }, [visibleEtiologyComponents]);
   
-  // Set initial dates when enabledDates are loaded (start = first encounter, end = last encounter)
+  // Set initial dates when enabledDates are loaded (both start and end = last encounter)
   useEffect(() => {
     if (hasPersistedDates) return; // Don't override persisted dates
-    if (!startDate && !endDate && firstEncounterDate && lastEncounterDate && !enabledDatesLoading) {
-      setStartDate(firstEncounterDate);
+    if (!startDate && !endDate && lastEncounterDate && !enabledDatesLoading) {
+      setStartDate(lastEncounterDate);
       setEndDate(lastEncounterDate);
     }
-  }, [firstEncounterDate, lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
+  }, [lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
 
-  // Auto-swap dates if start > end
-  useEffect(() => {
-    if (startDate && endDate && startDate > endDate) {
-      const temp = startDate;
-      setStartDate(endDate);
-      setEndDate(temp);
-    }
-  }, [startDate, endDate]);
+  // Note: Auto-swap of dates (if start > end) is now handled by usePersistedDates hook
 
   // Check if it's a single date (same start and end)
   const isSingleDate = startDateStr === endDateStr;
@@ -220,28 +218,45 @@ export default function EtiologyReport() {
   // Process data for charts and tables
   // We expect the API to return objects. We might need to map keys if they differ.
   // Based on user prompt: "Wound Etiology", "Count", "Percentage"
-  const processedData = (data || []).map((item: any) => {
-    let etiologyName = item.woundEtiology || item['Wound Etiology'] || item.name || 'Unknown';
-    // Replace 'null' string with 'Other'
-    if (etiologyName === 'null' || etiologyName === null) {
-      etiologyName = 'Other';
-    }
-    // Normalize pressure etiology variants
-    etiologyName = normalizeEtiology(etiologyName);
-    return {
-      name: etiologyName,
-      value: Number(item.count || item.Count || item.value || 0),
-      percentage: Number(item.percentage || item.Percentage || 0),
-      fill: COLORS[0].fill,
-      stroke: COLORS[0].stroke
-    };
-  }).map((item: any, index: number) => ({
-    ...item,
-    fill: COLORS[index % COLORS.length].fill,
-    stroke: COLORS[index % COLORS.length].stroke
-  }));
+  const processedData = useMemo(() => {
+    return (data || []).map((item: any) => {
+      let etiologyName = item.woundEtiology || item['Wound Etiology'] || item.name || 'Unknown';
+      // Replace 'null' string with 'Other'
+      if (etiologyName === 'null' || etiologyName === null) {
+        etiologyName = 'Other';
+      }
+      // Normalize pressure etiology variants
+      etiologyName = normalizeEtiology(etiologyName);
+      return {
+        name: etiologyName,
+        value: Number(item.count || item.Count || item.value || 0),
+        percentage: Number(item.percentage || item.Percentage || 0),
+        fill: COLORS[0].fill,
+        stroke: COLORS[0].stroke
+      };
+    }).map((item: any, index: number) => ({
+      ...item,
+      fill: COLORS[index % COLORS.length].fill,
+      stroke: COLORS[index % COLORS.length].stroke
+    }));
+  }, [data]);
 
-  const totalCount = processedData.reduce((acc: number, curr: any) => acc + curr.value, 0);
+  const totalCount = useMemo(() => {
+    return processedData.reduce((acc: number, curr: any) => acc + curr.value, 0);
+  }, [processedData]);
+
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
+          <p className="text-muted-foreground mt-1">Breakdown of wound types for selected date range</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -256,27 +271,35 @@ export default function EtiologyReport() {
               </p>
           </div>
           
-          <div className="flex items-center gap-2 flex-wrap">
-            <DatePicker
-              date={startDate}
-              setDate={setStartDate}
-              label="Start Date"
-              enabledDates={enabledDates}
-              isLoading={enabledDatesLoading}
-              defaultMonth={startDate || firstEncounterDate}
-            />
-            <span className="text-muted-foreground">to</span>
-            <DatePicker
-              date={endDate}
-              setDate={setEndDate}
-              label="End Date"
-              enabledDates={enabledDates}
-              isLoading={enabledDatesLoading}
-              defaultMonth={endDate || lastEncounterDate}
-            />
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
+          <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePicker
+                date={startDate}
+                setDate={setStartDate}
+                label="Start Date"
+                enabledDates={enabledDates}
+                isLoading={enabledDatesLoading}
+                defaultMonth={startDate || firstEncounterDate}
+              />
+              <span className="text-muted-foreground">to</span>
+              <DatePicker
+                date={endDate}
+                setDate={setEndDate}
+                label="End Date"
+                enabledDates={enabledDates}
+                isLoading={enabledDatesLoading}
+                defaultMonth={endDate || lastEncounterDate}
+              />
+              <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+                <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+            </div>
+            {/* Date Range Info */}
+            {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+              <p className="text-xs text-muted-foreground mt-[5px]">
+                Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+              </p>
+            )}
           </div>
       </div>
       </div>
@@ -328,7 +351,7 @@ export default function EtiologyReport() {
                     ) : (
                         <div className="flex h-[450px] w-full gap-2 pl-1">
                         {/* Legend on the left with scroll */}
-                        <div className="w-20 overflow-y-auto flex-shrink-0 py-4">
+                        <div className="w-[120px] overflow-y-auto flex-shrink-0 py-4">
                             <div className="space-y-2">
                                 {processedData.map((entry: any, index: number) => {
                                     const isHidden = hiddenEtiologies.has(entry.name);

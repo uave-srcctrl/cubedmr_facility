@@ -50,37 +50,73 @@ export function usePersistedDates({ facilityId, singleDateMode = false }: Persis
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   };
 
-  // Set start date and persist
+  // Set start date and persist (with auto-swap if start > end)
   const setStartDate = useCallback((date: Date | undefined) => {
-    setStartDateState(date);
-    if (date && facilityId) {
-      sessionStorage.setItem(STORAGE_KEY_START, formatForStorage(date));
-      sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
-      if (singleDateMode) {
-        sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(date));
-        setEndDateState(date);
-      }
-      // Dispatch event for other components
-      window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
-        detail: { startDate: date, endDate: singleDateMode ? date : endDate } 
-      }));
-    } else if (!date) {
+    if (!date) {
+      setStartDateState(undefined);
       sessionStorage.removeItem(STORAGE_KEY_START);
+      return;
+    }
+    
+    // Auto-swap if new start date is after current end date
+    if (endDate && date > endDate && !singleDateMode) {
+      // Swap: new start becomes end, old end becomes start
+      setStartDateState(endDate);
+      setEndDateState(date);
+      if (facilityId) {
+        sessionStorage.setItem(STORAGE_KEY_START, formatForStorage(endDate));
+        sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(date));
+        sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
+        window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
+          detail: { startDate: endDate, endDate: date } 
+        }));
+      }
+    } else {
+      setStartDateState(date);
+      if (facilityId) {
+        sessionStorage.setItem(STORAGE_KEY_START, formatForStorage(date));
+        sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
+        if (singleDateMode) {
+          sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(date));
+          setEndDateState(date);
+        }
+        window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
+          detail: { startDate: date, endDate: singleDateMode ? date : endDate } 
+        }));
+      }
     }
   }, [facilityId, singleDateMode, endDate]);
 
-  // Set end date and persist
+  // Set end date and persist (with auto-swap if end < start)
   const setEndDate = useCallback((date: Date | undefined) => {
-    setEndDateState(date);
-    if (date && facilityId) {
-      sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(date));
-      sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
-      // Dispatch event for other components
-      window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
-        detail: { startDate, endDate: date } 
-      }));
-    } else if (!date) {
+    if (!date) {
+      setEndDateState(undefined);
       sessionStorage.removeItem(STORAGE_KEY_END);
+      return;
+    }
+    
+    // Auto-swap if new end date is before current start date
+    if (startDate && date < startDate) {
+      // Swap: new end becomes start, old start becomes end
+      setEndDateState(startDate);
+      setStartDateState(date);
+      if (facilityId) {
+        sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(startDate));
+        sessionStorage.setItem(STORAGE_KEY_START, formatForStorage(date));
+        sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
+        window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
+          detail: { startDate: date, endDate: startDate } 
+        }));
+      }
+    } else {
+      setEndDateState(date);
+      if (facilityId) {
+        sessionStorage.setItem(STORAGE_KEY_END, formatForStorage(date));
+        sessionStorage.setItem(STORAGE_KEY_FACILITY, facilityId);
+        window.dispatchEvent(new CustomEvent(DATE_CHANGED_EVENT, { 
+          detail: { startDate, endDate: date } 
+        }));
+      }
     }
   }, [facilityId, startDate]);
 

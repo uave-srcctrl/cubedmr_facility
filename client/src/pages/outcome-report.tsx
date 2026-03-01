@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, subDays, subMonths } from "date-fns";
 import { Calendar as CalendarIcon, FileDown, AlertCircle, RefreshCcw } from "lucide-react";
@@ -18,7 +18,9 @@ import { useReportDateRange } from "@/hooks/use-report-date-range";
 import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { EcgLoader } from "@/components/ecg-loader";
 import { REMOTE_API, getFacilityId } from "@/lib/api-config";
 import { normalizeFieldNames } from "@/lib/field-mapper";
@@ -29,22 +31,54 @@ export default function OutcomeReportGlobal() {
   const { startDate, endDate, setStartDate, setEndDate, startDateStr, endDateStr } = useReportDateRange();
   const authInfo = getAuthInfo();
   
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
+  
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => {
     // First try getSelectedFacility, then fallback to getFacilityId
     const selected = getSelectedFacility();
     return selected || getFacilityId(authInfo.entityId);
   });
-  const { data: enabledDates = [] } = useEnabledDates(facilityId);
+  const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId);
+  const [datesInitialized, setDatesInitialized] = useState(false);
   
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
       console.log('[OutcomeReport] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
+      setDatesInitialized(false); // Reset dates initialization when facility changes
     });
     return unsubscribe;
   }, []);
+
+  // Calculate first and last encounter dates from enabledDates
+  const { firstEncounterDate, lastEncounterDate } = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const firstDateStr = enabledDates[0];
+      const lastDateStr = enabledDates[enabledDates.length - 1];
+      
+      const [startYear, startMonth, startDay] = firstDateStr.split('-').map(Number);
+      const [endYear, endMonth, endDay] = lastDateStr.split('-').map(Number);
+      
+      return {
+        firstEncounterDate: new Date(startYear, startMonth - 1, startDay),
+        lastEncounterDate: new Date(endYear, endMonth - 1, endDay)
+      };
+    }
+    return { firstEncounterDate: undefined, lastEncounterDate: undefined };
+  }, [enabledDates]);
+
+  // Set initial dates from enabledDates (both start and end = most recent encounter)
+  useEffect(() => {
+    if (!enabledDatesLoading && lastEncounterDate && !datesInitialized) {
+      console.log('[OutcomeReport] Setting date range to most recent:', lastEncounterDate);
+      setStartDate(lastEncounterDate);
+      setEndDate(lastEncounterDate);
+      setDatesInitialized(true);
+    }
+  }, [enabledDates, enabledDatesLoading, firstEncounterDate, lastEncounterDate, datesInitialized, setStartDate, setEndDate]);
   
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!facilityId) {
@@ -60,8 +94,6 @@ export default function OutcomeReportGlobal() {
       </div>
     );
   }
-
-  const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
   
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
@@ -108,6 +140,19 @@ export default function OutcomeReportGlobal() {
   // but we will handle loading/error states separately.
   const reportData = data || {};
 
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Outcome Report Global</h1>
+          <p className="text-muted-foreground mt-1">Comprehensive clinical outcomes over a selected period</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -116,21 +161,29 @@ export default function OutcomeReportGlobal() {
             <h1 className="text-3xl font-bold tracking-tight text-foreground">Outcome Report Global</h1>
             <p className="text-muted-foreground mt-1">Comprehensive clinical outcomes over a selected period</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {isComponentEnabled('outcome-report', 'timeline') && (
-            <>
-            <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" enabledDates={enabledDates} />
-            <span className="text-muted-foreground">-</span>
-            <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" enabledDates={enabledDates} />
-            </>
+          <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isComponentEnabled('outcome-report', 'timeline') && (
+              <>
+              <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" enabledDates={enabledDates} />
+              <span className="text-muted-foreground">-</span>
+              <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" enabledDates={enabledDates} />
+              </>
+              )}
+              <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+                <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+              <Button variant="default" className="ml-2">
+                <FileDown className="mr-2 h-4 w-4" />
+                Export
+              </Button>
+            </div>
+            {/* Date Range Info */}
+            {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+              <p className="text-xs text-muted-foreground mt-[5px]">
+                Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+              </p>
             )}
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
-            <Button variant="default" className="ml-2">
-              <FileDown className="mr-2 h-4 w-4" />
-              Export
-            </Button>
           </div>
         </div>
       </div>

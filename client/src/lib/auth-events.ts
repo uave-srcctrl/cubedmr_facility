@@ -9,6 +9,7 @@ export const AUTH_EVENTS = {
   AUTH_READY: 'auth:ready',
   FACILITY_CHANGED: 'auth:facility_changed',
   DATA_IMPORTED: 'auth:data_imported',
+  FACILITIES_UPDATED: 'auth:facilities_updated',
 };
 
 export function dispatchAuthEvent(eventName: string, detail?: any) {

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -12,32 +13,49 @@ export interface ExportColumn {
   width?: number;
 }
 
+export interface ExcelExportOptions {
+  title?: string;
+  subtitle?: string;
+  logoUrl?: string;
+}
+
 /**
- * Export data to Excel file
+ * Export data to Excel file with optional logo header
  * @param data - Array of objects to export
  * @param filename - Name of the file (without extension)
  * @param sheetName - Name of the sheet
  * @param columns - Optional column configuration for ordering and headers
+ * @param options - Optional title, subtitle, and logo for header
  */
-export function exportToExcel(
+export async function exportToExcel(
   data: any[],
   filename: string,
   sheetName: string = 'Data',
-  columns?: ExportColumn[]
+  columns?: ExportColumn[],
+  options?: ExcelExportOptions
 ) {
   if (!data || data.length === 0) {
     console.warn('No data to export');
     return;
   }
 
-  let exportData: any[];
+  // Prepare export data with column transformations
+  let exportData: Record<string, any>[];
   
   if (columns) {
-    // Map data with custom columns
     exportData = data.map(row => {
       const newRow: Record<string, any> = {};
       columns.forEach(col => {
-        newRow[col.header] = row[col.key] ?? '';
+        let value = row[col.key] ?? '';
+        // Format dimensions (Size column) to 2 decimal places
+        if (col.key === 'Size (cm)' && typeof value === 'string' && value.includes('x')) {
+          const parts = value.split('x').map((v: string) => {
+            const num = parseFloat(v.trim());
+            return isNaN(num) ? v.trim() : num.toFixed(2);
+          });
+          value = parts.join(' x ');
+        }
+        newRow[col.header] = value;
       });
       return newRow;
     });
@@ -45,23 +63,101 @@ export function exportToExcel(
     exportData = data;
   }
 
-  // Create workbook and worksheet
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(exportData);
-
-  // Set column widths if specified
-  if (columns) {
-    ws['!cols'] = columns.map(col => ({ wch: col.width || 15 }));
+  // Create workbook with ExcelJS for logo support
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sheetName);
+  
+  let currentRow = 1;
+  
+  // Add logo if provided (columns A-B, rows 1-5)
+  if (options?.logoUrl) {
+    try {
+      // Fetch logo and convert to base64
+      const response = await fetch(options.logoUrl);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+      
+      const imageId = workbook.addImage({
+        base64: base64.split(',')[1],
+        extension: 'png',
+      });
+      
+      // Place logo in columns A-B, rows 1-5
+      worksheet.addImage(imageId, 'A1:B5' as any);
+    } catch (e) {
+      console.warn('Could not load logo for Excel:', e);
+    }
   }
-
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-
+  
+  // Add title in column C, row 2
+  if (options?.title) {
+    worksheet.getCell('C2').value = options.title;
+    worksheet.getCell('C2').font = { bold: true, size: 16 };
+  }
+  
+  // Add subtitle in column C, row 3
+  if (options?.subtitle) {
+    worksheet.getCell('C3').value = options.subtitle;
+    worksheet.getCell('C3').font = { size: 12, color: { argb: 'FF666666' } };
+  }
+  
+  // Add timestamp in column C, row 4
+  if (options?.title || options?.subtitle) {
+    worksheet.getCell('C4').value = `Generated: ${new Date().toLocaleString()}`;
+    worksheet.getCell('C4').font = { size: 10, color: { argb: 'FF999999' } };
+  }
+  
+  // Content starts at row 7 (row 6 is empty)
+  currentRow = 7;
+  
+  // Add header row
+  const headers = columns ? columns.map(col => col.header) : Object.keys(exportData[0] || {});
+  const headerRow = worksheet.getRow(currentRow);
+  headers.forEach((header, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = header;
+    cell.font = { bold: true };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F0F0' }
+    };
+  });
+  currentRow++;
+  
+  // Add data rows
+  exportData.forEach(row => {
+    const dataRow = worksheet.getRow(currentRow);
+    headers.forEach((header, index) => {
+      dataRow.getCell(index + 1).value = row[header] ?? '';
+    });
+    currentRow++;
+  });
+  
+  // Set column widths
+  if (columns) {
+    columns.forEach((col, index) => {
+      worksheet.getColumn(index + 1).width = col.width || 15;
+    });
+  }
+  
   // Generate filename with date
   const date = new Date().toISOString().split('T')[0];
   const fullFilename = `${filename}_${date}.xlsx`;
-
-  // Save file
-  XLSX.writeFile(wb, fullFilename);
+  
+  // Write to buffer and download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fullFilename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 // ============================================================================
@@ -73,6 +169,7 @@ export interface PDFExportOptions {
   subtitle?: string;
   orientation?: 'portrait' | 'landscape';
   format?: 'a4' | 'letter';
+  logoUrl?: string;
 }
 
 /**
@@ -166,7 +263,7 @@ export async function exportToPDF(
 /**
  * Export table data to PDF (for better quality than html2canvas)
  */
-export function exportTableToPDF(
+export async function exportTableToPDF(
   data: any[],
   columns: ExportColumn[],
   filename: string,
@@ -181,7 +278,8 @@ export function exportTableToPDF(
     title,
     subtitle,
     orientation = 'landscape',
-    format = 'letter'
+    format = 'letter',
+    logoUrl
   } = options;
 
   const pdf = new jsPDF({
@@ -194,6 +292,25 @@ export function exportTableToPDF(
   const margin = 10;
   
   let yPosition = margin;
+
+  // Add logo in top right corner if provided
+  if (logoUrl) {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load logo'));
+        img.src = logoUrl;
+      });
+      const logoWidth = 55;
+      const logoHeight = (img.height / img.width) * logoWidth;
+      const logoX = pageWidth - margin - logoWidth;
+      pdf.addImage(img, 'PNG', logoX, margin, logoWidth, logoHeight);
+    } catch (e) {
+      console.warn('Could not load logo for PDF:', e);
+    }
+  }
 
   // Add title if provided
   if (title) {
@@ -217,9 +334,21 @@ export function exportTableToPDF(
   pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, yPosition + 2);
   yPosition += 8;
 
-  // Calculate column widths
+  // Calculate column widths - support custom widths
   const tableWidth = pageWidth - 2 * margin;
-  const colWidth = tableWidth / columns.length;
+  const totalCustomWidth = columns.reduce((sum, col) => sum + (col.width || 0), 0);
+  const colsWithoutWidth = columns.filter(col => !col.width).length;
+  const remainingWidth = tableWidth - totalCustomWidth;
+  const defaultColWidth = colsWithoutWidth > 0 ? remainingWidth / colsWithoutWidth : tableWidth / columns.length;
+  
+  // Calculate x positions for each column
+  const colWidths = columns.map(col => col.width || defaultColWidth);
+  const colPositions: number[] = [];
+  let currentX = margin;
+  columns.forEach((_, i) => {
+    colPositions.push(currentX);
+    currentX += colWidths[i];
+  });
 
   // Draw header
   pdf.setFillColor(240, 240, 240);
@@ -228,12 +357,13 @@ export function exportTableToPDF(
   pdf.setTextColor(51, 51, 51);
   
   columns.forEach((col, i) => {
-    const x = margin + i * colWidth + 2;
-    pdf.text(col.header, x, yPosition + 5, { maxWidth: colWidth - 4 });
+    const x = colPositions[i] + 2;
+    pdf.text(col.header, x, yPosition + 5, { maxWidth: colWidths[i] - 4 });
   });
   yPosition += 8;
 
-  // Draw rows
+  // Draw rows (10mm row height for better readability)
+  const rowHeight = 10;
   pdf.setFontSize(7);
   data.forEach((row, rowIndex) => {
     // Check if we need a new page
@@ -245,15 +375,25 @@ export function exportTableToPDF(
     // Alternate row colors
     if (rowIndex % 2 === 0) {
       pdf.setFillColor(250, 250, 250);
-      pdf.rect(margin, yPosition, tableWidth, 7, 'F');
+      pdf.rect(margin, yPosition, tableWidth, rowHeight, 'F');
     }
 
     columns.forEach((col, i) => {
-      const x = margin + i * colWidth + 2;
-      const value = String(row[col.key] ?? '');
-      pdf.text(value.substring(0, 20), x, yPosition + 4.5, { maxWidth: colWidth - 4 });
+      const x = colPositions[i] + 2;
+      let value = String(row[col.key] ?? '');
+      
+      // Format dimensions (Size column) to 2 decimal places
+      if (col.key === 'Size (cm)' && value.includes('x')) {
+        const parts = value.split('x').map((v: string) => {
+          const num = parseFloat(v.trim());
+          return isNaN(num) ? v.trim() : num.toFixed(2);
+        });
+        value = parts.join(' x ');
+      }
+      
+      pdf.text(value.substring(0, 25), x, yPosition + 6, { maxWidth: colWidths[i] - 4 });
     });
-    yPosition += 7;
+    yPosition += rowHeight;
   });
 
   // Generate filename with date

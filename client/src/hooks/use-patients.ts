@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { LOCAL_API } from "@/lib/api-config";
+import { apiCall, apiCallRaw } from "@/lib/api-client";
 import { useAuth } from "./use-auth";
+import { QUERY_STALE_TIME_MS } from "@/lib/constants";
 
 interface FacilityPatient {
   patient_id: string;
@@ -50,43 +51,26 @@ interface WoundEncounter {
  * Hook to fetch patients for a specific facility
  */
 export function useFacilityPatients(facilityId: string | null) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const token = getToken();
   const email = getEmail();
 
   return useQuery<FacilityPatient[], Error>({
     queryKey: ["facilityPatients", facilityId],
     queryFn: async () => {
-      if (!facilityId || !token || !email) {
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "lstFacilityPatients", // Correct method for listing patients
-          token,
-          email,
-          deviceId,
-          facilityId,
-        }),
+      return apiCall<FacilityPatient[]>("lstFacilityPatients", {
+        token,
+        email,
+        deviceId: getDeviceId(),
+        params: { facilityId },
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch patients: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.data || [];
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -94,44 +78,26 @@ export function useFacilityPatients(facilityId: string | null) {
  * Hook to fetch wound encounters for a specific patient
  */
 export function usePatientDetail(facilityId: string | null, patientId: string | null) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const token = getToken();
   const email = getEmail();
 
   return useQuery<WoundEncounter[], Error>({
     queryKey: ["patientDetail", facilityId, patientId],
     queryFn: async () => {
-      if (!facilityId || !patientId || !token || !email) {
+      if (!facilityId || !patientId) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityPatientDetail", // Correct method for patient details
-          token,
-          email,
-          deviceId,
-          facilityId,
-          patientId,
-        }),
+      return apiCall<WoundEncounter[]>("getFacilityPatientDetail", {
+        token,
+        email,
+        deviceId: getDeviceId(),
+        params: { facilityId, patientId },
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch patient details: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.data || [];
     },
     enabled: !!facilityId && !!patientId && !!token && !!email,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -151,45 +117,26 @@ interface PatientByDate {
  * Returns patients who have wound encounters within the specified date range
  */
 export function useFacilityPatientsByDate(facilityId: string | null, startDate: string | null, endDate?: string | null) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const token = getToken();
   const email = getEmail();
 
   return useQuery<PatientByDate[], Error>({
     queryKey: ["facilityPatientsByDate", facilityId, startDate, endDate],
     queryFn: async () => {
-      if (!facilityId || !startDate || !token || !email) {
+      if (!facilityId || !startDate) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "lstFacilityPatientsByDate",
-          token,
-          email,
-          deviceId,
-          facilityId,
-          startDate,
-          endDate: endDate || startDate,
-        }),
+      return apiCall<PatientByDate[]>("lstFacilityPatientsByDate", {
+        token,
+        email,
+        deviceId: getDeviceId(),
+        params: { facilityId, startDate, endDate: endDate || startDate },
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch patients: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.data || [];
     },
     enabled: !!facilityId && !!startDate && !!token && !!email,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: QUERY_STALE_TIME_MS,
     placeholderData: (previousData) => previousData, // Keep previous data while fetching new
     refetchOnWindowFocus: false,
   });
@@ -260,62 +207,36 @@ interface CriticalCasesResponse {
  * and evaluates critical status based on the last encounter within the range.
  */
 export function useCriticalCases(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
-  
-  console.log('[useCriticalCases] facilityId:', facilityId, 'startDate:', startDate, 'endDate:', endDate, 'token:', !!token, 'email:', email);
 
   return useQuery<CriticalCasesResponse, Error>({
     queryKey: ["criticalCases", facilityId, startDate, endDate],
     queryFn: async () => {
-      // Re-fetch token and email inside queryFn for freshness
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      console.log('[useCriticalCases] queryFn executing for facilityId:', facilityId, 'startDate:', startDate, 'endDate:', endDate);
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        console.log('[useCriticalCases] Missing params:', { facilityId, token: !!currentToken, email: currentEmail });
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      console.log('[useCriticalCases] Fetching from:', LOCAL_API.FACILITIES_LIST);
-      
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityCriticalCases",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<CriticalPatient[]>("getFacilityCriticalCases", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch critical cases: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch critical cases");
       }
 
-      const data = await response.json();
-      console.log('[useCriticalCases] Response:', data);
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -381,61 +302,36 @@ interface DeterioratingWoundsResponse {
  * Returns wounds where progress status is "Deteriorating"
  */
 export function useDeterioratingWounds(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
-  
-  console.log('[useDeterioratingWounds] facilityId:', facilityId, 'startDate:', startDate, 'endDate:', endDate, 'token:', !!token, 'email:', email);
 
   return useQuery<DeterioratingWoundsResponse, Error>({
     queryKey: ["deterioratingWounds", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      console.log('[useDeterioratingWounds] queryFn executing for facilityId:', facilityId, 'startDate:', startDate, 'endDate:', endDate);
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        console.log('[useDeterioratingWounds] Missing params:', { facilityId, token: !!currentToken, email: currentEmail });
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      console.log('[useDeterioratingWounds] Fetching from:', LOCAL_API.FACILITIES_LIST);
-      
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityDeterioratingWounds",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<DeterioratingPatient[]>("getFacilityDeterioratingWounds", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch deteriorating wounds: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch deteriorating wounds");
       }
 
-      const data = await response.json();
-      console.log('[useDeterioratingWounds] Response:', data);
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -454,53 +350,36 @@ interface WoundActivityResponse {
  * Returns wounds where progress = 'New'
  */
 export function useNewWounds(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundActivityResponse, Error>({
     queryKey: ["newWounds", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityNewWounds",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<WoundActivityPatient[]>("getFacilityNewWounds", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch new wounds: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch new wounds");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -509,53 +388,36 @@ export function useNewWounds(facilityId: string | null, startDate?: string, endD
  * Returns wounds where disposition = 'Resolved'
  */
 export function useResolvedWounds(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundActivityResponse, Error>({
     queryKey: ["resolvedWounds", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityResolvedWounds",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<WoundActivityPatient[]>("getFacilityResolvedWounds", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch resolved wounds: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch resolved wounds");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -564,53 +426,36 @@ export function useResolvedWounds(facilityId: string | null, startDate?: string,
  * Returns wounds where disposition = 'Active'
  */
 export function useActiveWounds(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundActivityResponse, Error>({
     queryKey: ["activeWounds", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityActiveWounds",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<WoundActivityPatient[]>("getFacilityActiveWounds", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch active wounds: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch active wounds");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -619,53 +464,36 @@ export function useActiveWounds(facilityId: string | null, startDate?: string, e
  * Returns wounds where days > 100
  */
 export function useChronicWounds(facilityId: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundActivityResponse, Error>({
     queryKey: ["chronicWounds", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !currentToken || !currentEmail) {
-        throw new Error("Missing required parameters");
+      if (!facilityId) {
+        throw new Error("Missing facility ID");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getFacilityChronicWounds",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<WoundActivityPatient[]>("getFacilityChronicWounds", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch chronic wounds: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch chronic wounds");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -697,50 +525,20 @@ interface UpdateWoundEncounterParams {
  * Hook to update a wound encounter
  */
 export function useUpdateWoundEncounter() {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (params: UpdateWoundEncounterParams) => {
-      const token = getToken();
-      const email = getEmail();
-      
-      if (!token || !email) {
-        throw new Error("Missing authentication");
-      }
-
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "updateWoundEncounter",
-          token,
-          email,
-          deviceId,
-          ...params,
-        }),
+      return apiCall<{ success: boolean }>("updateWoundEncounter", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params,
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to update wound encounter: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      if (!data.status) {
-        throw new Error(data.error || "Update failed");
-      }
-      
-      return data;
     },
     onSuccess: async (_, variables) => {
       // Refetch all wound-related queries to refresh data across all modals
-      // Using refetchQueries to ensure data is updated before proceeding
       await Promise.all([
         queryClient.refetchQueries({ queryKey: ["patientDetail", variables.facilityId, variables.patientId] }),
         queryClient.refetchQueries({ queryKey: ["facilityPatients"] }),
@@ -801,53 +599,36 @@ interface ReportsGeneratedResponse {
  * Hook to fetch reports generated (wound encounters) within a date range
  */
 export function useReportsGenerated(facilityId: string | null, startDate: string | null, endDate: string | null) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<ReportsGeneratedResponse, Error>({
     queryKey: ["reportsGenerated", facilityId, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !currentToken || !currentEmail || !startDate || !endDate) {
+      if (!facilityId || !startDate || !endDate) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getReportsList",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          dosStart: startDate,
-          dosEnd: endDate,
-        }),
+      const response = await apiCallRaw<ReportPatient[]>("getReportsList", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch reports: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch reports");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_encounters: data.total_encounters || 0,
-        total_patients: data.total_patients || 0
+        data: response.data || [],
+        total_encounters: response.total_encounters || 0,
+        total_patients: response.total_patients || 0
       };
     },
     enabled: !!facilityId && !!token && !!email && !!startDate && !!endDate,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -864,55 +645,37 @@ export interface WoundsByEtiologyResponse {
  * Used for etiology distribution chart click functionality
  */
 export function useWoundsByEtiology(facilityId: string | null, etiology: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundsByEtiologyResponse, Error>({
     queryKey: ["woundsByEtiology", facilityId, etiology, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !etiology || !currentToken || !currentEmail) {
+      if (!facilityId || !etiology) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getWoundsByEtiology",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          etiology,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<CriticalPatient[]>("getWoundsByEtiology", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, etiology, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch wounds by etiology: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch wounds by etiology");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0,
-        etiology: data.etiology || etiology
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0,
+        etiology: response.etiology || etiology
       };
     },
     enabled: !!facilityId && !!etiology && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -929,55 +692,37 @@ export interface WoundsByHealingStatusResponse {
  * Used for healing status chart click functionality
  */
 export function useWoundsByHealingStatus(facilityId: string | null, healingStatus: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundsByHealingStatusResponse, Error>({
     queryKey: ["woundsByHealingStatus", facilityId, healingStatus, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !healingStatus || !currentToken || !currentEmail) {
+      if (!facilityId || !healingStatus) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getWoundsByHealingStatus",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          healingStatus,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<CriticalPatient[]>("getWoundsByHealingStatus", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, healingStatus, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch wounds by healing status: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch wounds by healing status");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0,
-        healingStatus: data.healingStatus || healingStatus
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0,
+        healingStatus: response.healingStatus || healingStatus
       };
     },
     enabled: !!facilityId && !!healingStatus && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 
@@ -994,55 +739,37 @@ export interface WoundsByDispositionResponse {
  * Used for wounds by status chart click functionality
  */
 export function useWoundsByDisposition(facilityId: string | null, disposition: string | null, startDate?: string, endDate?: string) {
-  const { getToken, getEmail } = useAuth();
+  const { getToken, getEmail, getDeviceId } = useAuth();
   const email = getEmail();
   const token = getToken();
 
   return useQuery<WoundsByDispositionResponse, Error>({
     queryKey: ["woundsByDisposition", facilityId, disposition, startDate, endDate],
     queryFn: async () => {
-      const currentToken = getToken();
-      const currentEmail = getEmail();
-      
-      if (!facilityId || !disposition || !currentToken || !currentEmail) {
+      if (!facilityId || !disposition) {
         throw new Error("Missing required parameters");
       }
 
-      const deviceId = localStorage.getItem("deviceId") || "web-" + Math.random().toString(36).substr(2, 9);
-
-      const response = await fetch(LOCAL_API.FACILITIES_LIST, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entity: "FacilityDataCenter",
-          method: "getWoundsByDisposition",
-          token: currentToken,
-          email: currentEmail,
-          deviceId,
-          facilityId,
-          disposition,
-          dosStart: startDate || undefined,
-          dosEnd: endDate || undefined,
-        }),
+      const response = await apiCallRaw<CriticalPatient[]>("getWoundsByDisposition", {
+        token: getToken(),
+        email: getEmail(),
+        deviceId: getDeviceId(),
+        params: { facilityId, disposition, dosStart: startDate, dosEnd: endDate },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch wounds by disposition: ${response.statusText}`);
+      if (!response.status) {
+        throw new Error(response.error || "Failed to fetch wounds by disposition");
       }
 
-      const data = await response.json();
-      
       return {
-        data: data.data || [],
-        total_wounds: data.total_wounds || 0,
-        total_patients: data.total_patients || 0,
-        disposition: data.disposition || disposition
+        data: response.data || [],
+        total_wounds: response.total_wounds || 0,
+        total_patients: response.total_patients || 0,
+        disposition: response.disposition || disposition
       };
     },
     enabled: !!facilityId && !!disposition && !!token && !!email,
-    staleTime: 5 * 60 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
   });
 }
 

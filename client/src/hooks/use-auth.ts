@@ -1,13 +1,7 @@
 import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
-
-// Helper function to compute SHA256 hash
-async function sha256(str: string): Promise<string> {
-  const buffer = new TextEncoder().encode(str);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+import { secureStorageSync } from "@/lib/secure-storage";
+import { sha256 } from "@/lib/crypto-utils";
 
 interface Facility {
   id: string;
@@ -22,7 +16,7 @@ export function useAuth() {
 
   function getToken(): string | null {
     if (typeof window === "undefined") return null;
-    let token = localStorage.getItem("authToken");
+    let token = secureStorageSync.getItem("authToken");
     // Clean up token if it has extra quotes (shouldn't happen, but defensive)
     if (token) {
       token = token.replace(/^["']|["']$/g, '');
@@ -32,19 +26,19 @@ export function useAuth() {
 
   function getEmail(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userEmail");
+    return secureStorageSync.getItem("userEmail");
   }
 
   function getFacilityId(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userFacilityId");
+    return secureStorageSync.getItem("userFacilityId");
   }
 
   // DEPRECATED: Use getAvailableFacilities() instead
   // This was the old sync getter - now use the new async getFacilities() to fetch from server
   function getStoredFacilities(): Facility[] {
     if (typeof window === "undefined") return [];
-    const facilitiesJson = localStorage.getItem("availableFacilities");
+    const facilitiesJson = secureStorageSync.getItem("availableFacilities");
     if (!facilitiesJson) return [];
     try {
       return JSON.parse(facilitiesJson);
@@ -55,39 +49,49 @@ export function useAuth() {
 
   function getEntity(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userEntity");
+    return secureStorageSync.getItem("userEntity");
   }
 
   function getEntityName(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userEntityName");
+    return secureStorageSync.getItem("userEntityName");
   }
 
   function getEntityId(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userEntityId");
+    return secureStorageSync.getItem("userEntityId");
   }
 
   function getCurrentTenant(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userCurrentTenant");
+    return secureStorageSync.getItem("userCurrentTenant");
   }
 
   function getUserName(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("userName");
+    return secureStorageSync.getItem("userName");
+  }
+
+  function getDeviceId(): string {
+    if (typeof window === "undefined") return "web-server";
+    let deviceId = localStorage.getItem("deviceId");
+    if (!deviceId) {
+      deviceId = "web-" + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem("deviceId", deviceId);
+    }
+    return deviceId;
   }
 
   // ==================== FACILITY SELECTION METHODS ====================
 
   function getSelectedFacility(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("selectedFacilityId");
+    return secureStorageSync.getItem("selectedFacilityId");
   }
 
   function setSelectedFacility(facilityId: string): void {
     if (typeof window === "undefined") return;
-    localStorage.setItem("selectedFacilityId", facilityId);
+    secureStorageSync.setItem("selectedFacilityId", facilityId);
     
     // Dispatch evento para que componentes se actualicen con el ID
     dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, facilityId);
@@ -95,7 +99,7 @@ export function useAuth() {
 
   function clearSelectedFacility(): void {
     if (typeof window === "undefined") return;
-    localStorage.removeItem("selectedFacilityId");
+    secureStorageSync.removeItem("selectedFacilityId");
     
     // Dispatch evento para que componentes se actualicen
     dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, null);
@@ -111,7 +115,7 @@ export function useAuth() {
 
   function getAvailableFacilities(): Facility[] {
     if (typeof window === "undefined") return [];
-    const facilitiesJson = localStorage.getItem("availableFacilities");
+    const facilitiesJson = secureStorageSync.getItem("availableFacilities");
     if (!facilitiesJson) return [];
     try {
       return JSON.parse(facilitiesJson);
@@ -122,10 +126,20 @@ export function useAuth() {
 
   function setAvailableFacilities(facilities: Facility[]): void {
     if (typeof window === "undefined") return;
-    localStorage.setItem("availableFacilities", JSON.stringify(facilities));
+    secureStorageSync.setItem("availableFacilities", JSON.stringify(facilities));
   }
 
   // ==================== AUTH STATE CHECKS ====================
+
+  /**
+   * Check if session has all required auth data (token AND email)
+   * Use this before making API calls that require email
+   */
+  function hasValidSession(): boolean {
+    const token = getToken();
+    const email = getEmail();
+    return !!(token && email);
+  }
 
   function isAuthenticated(): boolean {
     // Check if user has valid token (primary auth check)
@@ -154,17 +168,17 @@ export function useAuth() {
   async function logout(): Promise<void> {
     if (typeof window === "undefined") return;
     
-    console.log("[Auth] logout() called");
+    // Debug logging removed for HIPAA compliance
     
     try {
       const token = getToken();
       const email = getEmail();
       const facilityId = getFacilityId();
       
-      console.log("[Auth] Logout params - email:", email, "facilityId:", facilityId, "hasToken:", !!token);
+      // PHI logging removed for HIPAA compliance
       
       if (token && email) {
-        console.log("[Auth] Sending logout request to server...");
+        // Sending logout request to server
         const response = await fetch(LOCAL_API.LOGOUT, {
           method: "POST",
           headers: {
@@ -178,52 +192,43 @@ export function useAuth() {
         });
         
         const logoutResponse = await response.json();
-        console.log("[Auth] Logout response from server:", logoutResponse);
+        // Response logging removed for HIPAA compliance
       } else {
-        console.log("[Auth] No token or email, skipping server logout request");
+        // No token/email - skip server logout
       }
     } catch (error) {
-      console.error("[Auth] Logout error:", error);
+      console.error("[Auth] Logout error");
     } finally {
-      console.log("[Auth] Calling clearAuth()...");
+      // Calling clearAuth
       clearAuth();
-      console.log("[Auth] clearAuth() completed, localStorage cleaned");
+      // clearAuth completed
     }
   }
 
   function setAuth(token: string, email: string, entity?: string, entityName?: string, entityId?: string, facilityId?: string | null, facilities?: Facility[]): void {
     if (typeof window === "undefined") return;
-    localStorage.setItem("authToken", token);
-    localStorage.setItem("userEmail", email);
-    if (entity) localStorage.setItem("userEntity", entity);
-    if (entityName) localStorage.setItem("userEntityName", entityName);
-    if (entityId) localStorage.setItem("userEntityId", entityId);
-    if (facilityId) localStorage.setItem("userFacilityId", facilityId);
-    if (facilityId === null) localStorage.removeItem("userFacilityId");
+    secureStorageSync.setItem("authToken", token);
+    secureStorageSync.setItem("userEmail", email);
+    if (entity) secureStorageSync.setItem("userEntity", entity);
+    if (entityName) secureStorageSync.setItem("userEntityName", entityName);
+    if (entityId) secureStorageSync.setItem("userEntityId", entityId);
+    if (facilityId) secureStorageSync.setItem("userFacilityId", facilityId);
+    if (facilityId === null) secureStorageSync.removeItem("userFacilityId");
     if (facilities) setAvailableFacilities(facilities);
   }
 
   function clearAuth(): void {
     if (typeof window === "undefined") return;
     
-    console.log("[Auth] clearAuth() - Removing all auth-related localStorage items");
+    // HIPAA: Use secure storage clear for encrypted data
+    secureStorageSync.clearSensitiveData();
     
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userEmail");
-    localStorage.removeItem("userEntity");
-    localStorage.removeItem("userEntityName");
-    localStorage.removeItem("userEntityId");
-    localStorage.removeItem("userCurrentTenant");
-    localStorage.removeItem("userFacilityId");
+    // Also clear any remaining non-sensitive items
     localStorage.removeItem("userFacilities");
-    localStorage.removeItem("selectedFacilityId");
-    localStorage.removeItem("availableFacilities");
     localStorage.removeItem("userGroups");
     
-    console.log("[Auth] clearAuth() - Dispatching LOGOUT event");
     // Dispatch logout event
     dispatchAuthEvent(AUTH_EVENTS.LOGOUT);
-    console.log("[Auth] clearAuth() - Completed");
   }
 
   function getAuthInfo(): {
@@ -258,7 +263,7 @@ export function useAuth() {
 
   async function loadUser(email: string): Promise<boolean> {
     try {
-      console.log('[useAuth] loadUser called for email:', email);
+      // PHI logging removed for HIPAA compliance
 
       // Get deviceId
       let deviceId = localStorage.getItem("deviceId");
@@ -292,36 +297,27 @@ export function useAuth() {
       }
 
       const entityInfoData = await entityInfoResponse.json();
-      console.log('[useAuth] ================================================================================');
-      console.log('[useAuth] EntityInfo response:', entityInfoData);
-      console.log('[useAuth] All EntityInfo data fields:', Object.keys(entityInfoData?.data?.[0] || {}));
-      console.log('[useAuth] ================================================================================');
+      // PHI logging removed for HIPAA compliance
 
       if (entityInfoData.data && entityInfoData.data[0]) {
         const userData = entityInfoData.data[0];
-        console.log('[useAuth] Processing EntityInfo data:');
-        console.log('  entity:', userData.entity);
-        console.log('  ProviderId:', userData.ProviderId, '(type:', typeof userData.ProviderId + ')');
-        console.log('  ProviderName:', userData.ProviderName);
-        console.log('  NurseId:', userData.NurseId);
-        console.log('  NurseName:', userData.NurseName);
-        console.log('  email:', userData.email);
+        // PHI logging removed for HIPAA compliance
 
-        // Update user info in localStorage
-        if (userData.email) localStorage.setItem("userEmail", userData.email);
+        // Update user info using secure storage
+        if (userData.email) secureStorageSync.setItem("userEmail", userData.email);
         if (userData.mobile) localStorage.setItem("userMobile", userData.mobile);
         if (userData.mfa !== undefined) localStorage.setItem("userMfa", userData.mfa.toString());
-        if (userData.entityName) localStorage.setItem("userEntity", userData.entityName);
-        if (userData.entityName) localStorage.setItem("userEntityName", userData.entityName);
-        if (userData.currentTenant) localStorage.setItem("userCurrentTenant", userData.currentTenant.toString());
+        if (userData.entityName) secureStorageSync.setItem("userEntity", userData.entityName);
+        if (userData.entityName) secureStorageSync.setItem("userEntityName", userData.entityName);
+        if (userData.currentTenant) secureStorageSync.setItem("userCurrentTenant", userData.currentTenant.toString());
 
         // Store the real name of the user (Provider or Nurse name)
         if (userData.ProviderName) {
-          localStorage.setItem("userName", userData.ProviderName);
-          console.log('[useAuth] Stored Provider name:', userData.ProviderName);
+          secureStorageSync.setItem("userName", userData.ProviderName);
+          // PHI logging removed
         } else if (userData.NurseName) {
-          localStorage.setItem("userName", userData.NurseName);
-          console.log('[useAuth] Stored Nurse name:', userData.NurseName);
+          secureStorageSync.setItem("userName", userData.NurseName);
+          // PHI logging removed
         }
 
         // NOTE: entityId will be set after GroupsByUser is loaded, since userData.entity might be undefined
@@ -355,7 +351,7 @@ export function useAuth() {
       }
 
       const groupsData = await groupsResponse.json();
-      console.log('[useAuth] GroupsByUser response:', groupsData);
+      // PHI logging removed for HIPAA compliance
 
       // Clear existing groups
       localStorage.removeItem("userGroups");
@@ -370,29 +366,25 @@ export function useAuth() {
         if (groups.Staff === 1) userGroups.push('Staff');
 
         localStorage.setItem("userGroups", JSON.stringify(userGroups));
-        console.log('[useAuth] User groups set:', userGroups);
+        // PHI logging removed for HIPAA compliance
 
         // NOW set entityId based on user groups (not userData.entity which might be undefined)
-        console.log('[useAuth] Setting entityId based on user groups:');
+        // PHI logging removed for HIPAA compliance
         if (userGroups.includes('Provider')) {
           const tempProviderId = localStorage.getItem("tempProviderId");
           if (tempProviderId) {
-            console.log('[useAuth] ✅ Setting userEntityId to ProviderId:', tempProviderId);
-            localStorage.setItem("userEntityId", tempProviderId);
-          } else {
-            console.log('[useAuth] ⚠️ User is Provider but ProviderId not available');
+            // Setting userEntityId
+            secureStorageSync.setItem("userEntityId", tempProviderId);
           }
         } else if (userGroups.includes('Nurse')) {
           const tempNurseId = localStorage.getItem("tempNurseId");
           if (tempNurseId) {
-            console.log('[useAuth] ✅ Setting userEntityId to NurseId:', tempNurseId);
-            localStorage.setItem("userEntityId", tempNurseId);
-          } else {
-            console.log('[useAuth] ⚠️ User is Nurse but NurseId not available');
+            // Setting userEntityId
+            secureStorageSync.setItem("userEntityId", tempNurseId);
           }
         } else {
-          console.log('[useAuth] ❌ User is neither Provider nor Nurse, clearing entityId');
-          localStorage.removeItem("userEntityId");
+          // User is neither Provider nor Nurse
+          secureStorageSync.removeItem("userEntityId");
         }
 
         // Clean up temp variables
@@ -400,30 +392,25 @@ export function useAuth() {
         localStorage.removeItem("tempNurseId");
       }
 
-      console.log('[useAuth] loadUser completed successfully');
+      // loadUser completed
       return true;
     } catch (error) {
-      console.error('[useAuth] loadUser error:', error);
+      console.error('[useAuth] loadUser error');
       return false;
     }
   }
 
   async function getFacilities(): Promise<Facility[]> {
     try {
-      console.log("\n" + "=".repeat(80));
-      console.log("[useAuth] 🚀 getFacilities() INICIADO");
-      console.log("=".repeat(80));
-      console.log("Timestamp:", new Date().toISOString());
+      // PHI logging removed for HIPAA compliance
 
       const token = getToken();
       const email = getEmail();
 
-      console.log("\n[useAuth] 🔑 Autenticación:");
-      console.log("  Email:", email);
-      console.log("  Token:", token ? "✅ Presente (" + token.substring(0, 10) + "...)" : "❌ Falta");
+      // PHI logging removed for HIPAA compliance
 
       if (!token || !email) {
-        console.error("[useAuth] ❌ FALLO: No hay token o email disponible");
+        console.error("[useAuth] getFacilities: Missing auth credentials");
         return [];
       }
 
@@ -447,7 +434,7 @@ export function useAuth() {
       // Determine provider/practice IDs based on user role
       if (userGroups.includes('Provider') && entityId && entityId !== "undefined" && entityId !== "null") {
         providerId = entityId;
-        console.log("[useAuth] 👤 Usuario es Provider con ID:", providerId);
+        // PHI logging removed
       }
 
       // Build request payload using FacilityDataCenter entity structure
@@ -463,18 +450,11 @@ export function useAuth() {
       if (practiceId) requestPayload.practiceId = practiceId;
       // Note: FacilityDataCenter doesn't require providerId/id - it returns all facilities for the user
 
-      console.log("\n[useAuth] 📤 Payload de Petición:");
-      console.log("  URL:", LOCAL_API.FACILITIES_LIST);
-      console.log("  Entity:", requestPayload.entity);
-      console.log("  Method:", requestPayload.method);
-      console.log("  Email:", requestPayload.email);
-      console.log("  ProviderId:", requestPayload.providerId || "(no especificado)");
-      console.log("  PracticeId:", requestPayload.practiceId || "(no especificado)");
-      console.log("  Token:", "***" + cleanToken.substring(cleanToken.length - 8));
+      // PHI logging removed for HIPAA compliance
 
       // Send as JSON to Express server
       const startTime = performance.now();
-      console.log("\n[useAuth] ⏱️  Enviando petición al servidor...");
+      // Request logging removed
       
       const response = await fetch(LOCAL_API.FACILITIES_LIST, {
         method: "POST",
@@ -487,13 +467,10 @@ export function useAuth() {
       const endTime = performance.now();
       const duration = (endTime - startTime).toFixed(2);
       
-      console.log("[useAuth] ⏱️  Respuesta recibida en:", duration, "ms");
-      console.log("[useAuth] HTTP Status:", response.status, response.statusText);
+      // Performance logging removed for HIPAA compliance
 
       if (!response.ok) {
-        console.error("[useAuth] ❌ La petición falló con status:", response.status);
-        const errorText = await response.text();
-        console.error("[useAuth] Cuerpo del error:", errorText);
+        console.error("[useAuth] getFacilities request failed:", response.status);
         return [];
       }
 
@@ -502,17 +479,14 @@ export function useAuth() {
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error("[useAuth] ❌ Fallo al parsear JSON:", parseError);
+        console.error("[useAuth] getFacilities JSON parse error");
         return [];
       }
 
-      console.log("\n[useAuth] 📥 Respuesta Completa del Servidor:");
-      console.log("  Status:", data.status);
-      console.log("  Has data?", data.data ? "✅ Sí" : "❌ No");
+      // PHI logging removed for HIPAA compliance
 
       if (data.data && Array.isArray(data.data)) {
-        console.log("\n[useAuth] 📊 Datos Recibidos:");
-        console.log("  Total items:", data.data.length);
+        // PHI logging removed for HIPAA compliance
         
         const facilities: Facility[] = data.data.map((item: any) => ({
           id: item.id?.toString() || '',
@@ -550,50 +524,30 @@ export function useAuth() {
         const uniqueFacilities = facilities.filter(f => {
           const id = String(f.id);
           if (seenIds.has(id)) {
-            console.log(`[useAuth] ⚠️ Duplicate facility removed: ${f.name} (ID: ${id})`);
+            // Duplicate removed - PHI logging removed
             return false;
           }
           seenIds.add(id);
           return true;
         });
         
-        if (uniqueFacilities.length !== facilities.length) {
-          console.warn(`[useAuth] ⚠️ Removed ${facilities.length - uniqueFacilities.length} duplicate facilities`);
-        }
-
-        console.log("\n[useAuth] 📋 Detalles completos de cada facility:");
-        uniqueFacilities.forEach((f, i) => {
-          console.log(`\n  [Facility ${i + 1}] ${f.name || f.id}`);
-          console.log(`    ID: ${f.id}`);
-          console.log(`    Todos los campos:`, JSON.stringify(f, null, 4));
-          if (f.total_wound_encounters !== undefined || f.active_wounds !== undefined) {
-            console.log(`    └─ 🩹 Heridas: ${f.active_wounds || 0} activas / ${f.total_wound_encounters || 0} total | PUSH: ${f.average_push_score || 'N/A'} | Riesgo: ${f.acuity_level || 'N/A'}`);
-          }
-        });
+        // PHI logging removed for HIPAA compliance
 
         // Store facilities in localStorage
         setAvailableFacilities(uniqueFacilities);
         
-        console.log("\n[useAuth] 💾 Estado:");
-        console.log("  ✅ Facilities guardadas en localStorage");
-        console.log("  ✅ Total facilities:", uniqueFacilities.length);
+        // Dispatch event so components can refresh their data
+        dispatchAuthEvent(AUTH_EVENTS.FACILITIES_UPDATED, { count: uniqueFacilities.length });
         
-        console.log("\n" + "=".repeat(80));
-        console.log("[useAuth] ✅ getFacilities() COMPLETADO EXITOSAMENTE");
-        console.log("=".repeat(80) + "\n");
+        // PHI logging removed for HIPAA compliance
 
         return uniqueFacilities;
       }
 
-      console.log("\n[useAuth] ⚠️  ADVERTENCIA: No se encontró array 'data' en la respuesta");
-      console.log("[useAuth] Respuesta completa:", data);
+      // PHI logging removed for HIPAA compliance
       return [];
     } catch (error) {
-      console.error("\n[useAuth] ❌ ERROR en getFacilities():");
-      console.error("  Message:", (error as Error).message);
-      console.error("  Stack:", (error as Error).stack);
-      console.error("  Full Error:", error);
-      console.log("=".repeat(80) + "\n");
+      console.error("[useAuth] getFacilities error");
       return [];
     }
   }
@@ -634,7 +588,9 @@ export function useAuth() {
     getEntityId,
     getCurrentTenant,
     getUserName,
+    getDeviceId,
     isAuthenticated,
+    hasValidSession,
     isFacilitySelected,
     hasFacilities,
     getSelectedFacility,

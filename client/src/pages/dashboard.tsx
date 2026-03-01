@@ -10,9 +10,6 @@ import {
 } from "recharts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
-  woundEtiologyData, 
-  healingStatusData, 
-  woundsByStatusData,
   dashboardKPIs as mockDashboardKPIs
 } from "@/lib/mockData";
 import { ArrowUpRight, Activity, Users, FileText, AlertCircle, Loader2, Calendar as CalendarIcon, RefreshCcw } from "lucide-react";
@@ -23,7 +20,9 @@ import { useSettings } from "@/hooks/use-settings";
 import { LOCAL_API } from "@/lib/api-config";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { NoDataComponent } from "@/components/no-data-component-card";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { EcgLoader } from "@/components/ecg-loader";
 import { CriticalCasesModal } from "@/components/critical-cases-modal";
 import { ReportsGeneratedModal } from "@/components/reports-generated-modal";
@@ -59,6 +58,9 @@ export default function Dashboard() {
   
   // Settings hook for component visibility
   const { isComponentEnabled } = useSettings();
+  
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
   
   console.log('[Dashboard] Initial authInfo from hook:', authInfo);
   console.log('[Dashboard] Selected facility ID:', selectedFacilityId);
@@ -238,19 +240,12 @@ export default function Dashboard() {
     if (lastEncounterDate && !endDate) {
       setEndDate(lastEncounterDate);
     }
-    if (firstEncounterDate && !startDate) {
-      setStartDate(firstEncounterDate);
+    if (lastEncounterDate && !startDate) {
+      setStartDate(lastEncounterDate);
     }
-  }, [lastEncounterDate, firstEncounterDate, hasPersistedDates]);
+  }, [lastEncounterDate, hasPersistedDates]);
   
-  // Auto-swap dates if startDate > endDate
-  useEffect(() => {
-    if (startDate && endDate && startDate > endDate) {
-      const tempStart = startDate;
-      setStartDate(endDate);
-      setEndDate(tempStart);
-    }
-  }, [startDate, endDate]);
+  // Note: Auto-swap of dates (if start > end) is now handled by usePersistedDates hook
 
   // Get reports generated data (after dates are computed)
   const { data: reportsData, isLoading: reportsLoading, refetch: refetchReports } = useReportsGenerated(
@@ -333,14 +328,15 @@ export default function Dashboard() {
   }, [selectedFacilityId, tokenReady, startDateStr, endDateStr]);
 
   // Fetch wound etiology data using React Query with keepPreviousData for smooth transitions
+  // No fallback to mock data - show no-data component if backend returns empty
   const { 
-    data: etiologyData = woundEtiologyData, 
+    data: etiologyData = [], 
     isLoading: etiologyLoading,
     isFetching: etiologyFetching 
   } = useQuery({
     queryKey: ['dashboardEtiology', selectedFacilityId, startDateStr, endDateStr],
     queryFn: async () => {
-      if (!selectedFacilityId) return woundEtiologyData;
+      if (!selectedFacilityId) return [];
       
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -353,7 +349,10 @@ export default function Dashboard() {
       const etiologyUrl = `${LOCAL_API.DASHBOARD_WOUND_ETIOLOGY}?startDate=${startDateStr}&endDate=${endDateStr}`;
       const response = await fetch(etiologyUrl, { method: "GET", headers });
       
-      if (!response.ok) throw new Error('Etiology endpoint error');
+      if (!response.ok) {
+        setEtiologySource('no-data');
+        return [];
+      }
       
       const result = await response.json();
       if (result.status && Array.isArray(result.data) && result.data.length > 0) {
@@ -364,8 +363,8 @@ export default function Dashboard() {
           name: normalizeEtiology(item.name)
         }));
       }
-      setEtiologySource('mock');
-      return woundEtiologyData;
+      setEtiologySource('no-data');
+      return [];
     },
     enabled: !!selectedFacilityId && !!startDateStr && !!endDateStr && tokenReady,
     placeholderData: keepPreviousData,
@@ -572,6 +571,21 @@ export default function Dashboard() {
   // Falls back to dashboard KPI value if hook data is not available
   const criticalCases = criticalCasesData?.total_wounds ?? dashboardKPIs?.criticalCases?.value ?? 0;
 
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
+          </div>
+          <p className="text-muted-foreground mt-1">Overview of wound care performance and active cases.</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Dashboard Header */}
@@ -590,39 +604,47 @@ export default function Dashboard() {
             </div>
             <p className="text-muted-foreground mt-1">Overview of wound care performance and active cases.</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <DatePicker 
-              date={startDate}
-              setDate={setStartDate}
-              label="Start Date"
-              enabledDates={enabledDates}
-              isLoading={enabledDatesLoading}
-              disabled={enabledDatesLoading || !enabledDates.length}
-            />
-            <span className="text-muted-foreground">-</span>
-            <DatePicker 
-              date={endDate}
-              setDate={setEndDate}
-              label="End Date"
-              enabledDates={enabledDates}
-              isLoading={enabledDatesLoading}
-              disabled={enabledDatesLoading || !enabledDates.length}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                // Reset to default dates
-                if (lastEncounterDate && firstEncounterDate) {
-                  setEndDate(lastEncounterDate);
-                  setStartDate(firstEncounterDate);
-                }
-              }}
-              disabled={enabledDatesLoading || !enabledDates.length}
-            >
-              <RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />
-            </Button>
-            <DataSourceBadge source={kpisSource} />
+          <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePicker 
+                date={startDate}
+                setDate={setStartDate}
+                label="Start Date"
+                enabledDates={enabledDates}
+                isLoading={enabledDatesLoading}
+                disabled={enabledDatesLoading || !enabledDates.length}
+              />
+              <span className="text-muted-foreground">-</span>
+              <DatePicker 
+                date={endDate}
+                setDate={setEndDate}
+                label="End Date"
+                enabledDates={enabledDates}
+                isLoading={enabledDatesLoading}
+                disabled={enabledDatesLoading || !enabledDates.length}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  // Reset to default dates
+                  if (lastEncounterDate && firstEncounterDate) {
+                    setEndDate(lastEncounterDate);
+                    setStartDate(firstEncounterDate);
+                  }
+                }}
+                disabled={enabledDatesLoading || !enabledDates.length}
+              >
+                <RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />
+              </Button>
+              <DataSourceBadge source={kpisSource} />
+            </div>
+            {/* Date Range Info */}
+            {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+              <p className="text-xs text-muted-foreground mt-[5px]">
+                Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -789,7 +811,7 @@ export default function Dashboard() {
             ) : etiologyData && etiologyData.length > 0 ? (
               <div className="flex h-[400px] w-full gap-2 pl-1">
                 {/* Legend on the left with scroll */}
-                <div className="w-20 overflow-y-auto flex-shrink-0 py-4">
+                <div className="w-[120px] overflow-y-auto flex-shrink-0 py-4">
                   <div className="space-y-2">
                     {etiologyData.map((entry, index) => {
                       const isHidden = hiddenEtiologies.has(entry.name);
@@ -907,7 +929,7 @@ export default function Dashboard() {
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="bg-primary/10 rounded-lg p-3 text-center">
+                        <div className="bg-primary/10 rounded-lg p-3 text-center border">
                           <p className="text-xl font-bold text-primary">{woundReductionMedianData.median_days?.toFixed(1) || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">Median Days</p>
                         </div>
@@ -918,7 +940,7 @@ export default function Dashboard() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="bg-secondary/50 rounded-lg p-3 text-center">
+                        <div className="bg-secondary/50 rounded-lg p-3 text-center border">
                           <p className="text-xl font-bold">{woundReductionMedianData.avg_days?.toFixed(1) || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">Average Days</p>
                         </div>
@@ -951,7 +973,7 @@ export default function Dashboard() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="bg-green-500/10 rounded-lg p-3 text-center">
+                        <div className="bg-green-500/10 rounded-lg p-3 text-center border">
                           <p className="text-base font-bold text-green-600">{woundReductionMedianData.wounds_reduced || 0}</p>
                           <p className="text-xs text-muted-foreground">Improving</p>
                         </div>
@@ -962,7 +984,7 @@ export default function Dashboard() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="bg-yellow-500/10 rounded-lg p-3 text-center">
+                        <div className="bg-yellow-500/10 rounded-lg p-3 text-center border">
                           <p className="text-base font-bold text-yellow-600">{woundReductionMedianData.wounds_stable || 0}</p>
                           <p className="text-xs text-muted-foreground">Stable</p>
                         </div>
@@ -973,7 +995,7 @@ export default function Dashboard() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="bg-red-500/10 rounded-lg p-3 text-center">
+                        <div className="bg-red-500/10 rounded-lg p-3 text-center border">
                           <p className="text-base font-bold text-red-600">{woundReductionMedianData.wounds_increased || 0}</p>
                           <p className="text-xs text-muted-foreground">Worsening</p>
                         </div>
@@ -1220,7 +1242,7 @@ export default function Dashboard() {
             ) : woundsByStatusDataState && woundsByStatusDataState.length > 0 ? (
               <div className="flex h-[400px] w-full gap-1 pl-[25px]">
                 {/* Legend on the left - compact */}
-                <div className="w-20 overflow-y-auto flex-shrink-0 py-4">
+                <div className="w-[60px] overflow-y-auto flex-shrink-0 py-4">
                   <div className="space-y-1">
                     {(() => {
                       // Color mapping for wounds by status - pastel fill with solid border

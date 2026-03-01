@@ -48,7 +48,9 @@ import { useFacilityPatientsByDate, usePatientDetail, PatientByDate } from "@/ho
 import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { PatientDetailModal } from "@/components/patient-detail-modal";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { usePersistedDates } from "@/hooks/use-persisted-dates";
 
@@ -56,13 +58,15 @@ export default function PatientsPage() {
   const { getSelectedFacility } = useAuth();
   const { isComponentEnabled } = useSettings();
   
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
+  
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
   
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[PatientsPage] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
     });
     return unsubscribe;
@@ -107,23 +111,16 @@ export default function PatientsPage() {
     return undefined;
   }, [enabledDates]);
   
-  // Set initial dates when enabledDates are loaded (start = first encounter, end = last encounter)
+  // Set initial dates when enabledDates are loaded (both start and end = last encounter)
   useEffect(() => {
     if (hasPersistedDates) return; // Don't override persisted dates
-    if (!startDate && !endDate && firstEncounterDate && lastEncounterDate && !enabledDatesLoading) {
-      setStartDate(firstEncounterDate);
+    if (!startDate && !endDate && lastEncounterDate && !enabledDatesLoading) {
+      setStartDate(lastEncounterDate);
       setEndDate(lastEncounterDate);
     }
-  }, [firstEncounterDate, lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
+  }, [lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
 
-  // Auto-swap dates if start > end
-  useEffect(() => {
-    if (startDate && endDate && startDate > endDate) {
-      const temp = startDate;
-      setStartDate(endDate);
-      setEndDate(temp);
-    }
-  }, [startDate, endDate]);
+  // Note: Auto-swap of dates (if start > end) is now handled by usePersistedDates hook
 
   // Helper to safely format dates (avoids RangeError on invalid dates)
   const safeFormat = (date: Date | undefined, formatStr: string): string => {
@@ -144,51 +141,48 @@ export default function PatientsPage() {
   // Fetch patient details when a patient is selected
   const { data: woundEncounters = [], isLoading: detailLoading } = usePatientDetail(facilityId, selectedPatientId);
 
+  // Memoize filtered patients to avoid recalculating on every render
+  const filteredPatients = useMemo(() => {
+    return facilityPatients.filter((patient: PatientByDate) => {
+      const patientName = patient?.patient_name || "";
+      const woundLocations = patient?.wound_locations || "";
+      
+      // Filter by active status
+      if (patientFilter === 'active' && (patient?.active_wounds ?? 0) === 0) {
+        return false;
+      }
+      
+      // Filter by search term
+      let matchesSearch: boolean;
+      if (caseSensitive) {
+        matchesSearch =
+          patientName.includes(searchTerm) ||
+          woundLocations.includes(searchTerm);
+      } else {
+        const searchLower = searchTerm.toLowerCase();
+        matchesSearch =
+          patientName.toLowerCase().includes(searchLower) ||
+          woundLocations.toLowerCase().includes(searchLower);
+      }
 
-  const filteredPatients = facilityPatients.filter((patient: PatientByDate) => {
-    const patientName = patient?.patient_name || "";
-    const woundLocations = patient?.wound_locations || "";
-    
-    // Filter by active status
-    if (patientFilter === 'active' && (patient?.active_wounds ?? 0) === 0) {
-      return false;
-    }
-    
-    // Filter by search term
-    let matchesSearch: boolean;
-    if (caseSensitive) {
-      matchesSearch =
-        patientName.includes(searchTerm) ||
-        woundLocations.includes(searchTerm);
-    } else {
-      const searchLower = searchTerm.toLowerCase();
-      matchesSearch =
-        patientName.toLowerCase().includes(searchLower) ||
-        woundLocations.toLowerCase().includes(searchLower);
-    }
-
-    return matchesSearch;
-  });
+      return matchesSearch;
+    });
+  }, [facilityPatients, patientFilter, searchTerm, caseSensitive]);
 
   const handlePatientSelect = (patientId: string) => {
-    console.log("[Patients] Selecting patient:", patientId);
     setSelectedPatientId(patientId);
     setDetailModalOpen(true);
   };
 
   const renderPatientDetailModal = () => {
     if (!selectedPatientId || !detailModalOpen) {
-      console.log("[Patients] Modal not rendering - selectedPatientId:", selectedPatientId, "open:", detailModalOpen);
       return null;
     }
 
     const patient = facilityPatients.find(p => p.patient_id === selectedPatientId);
     if (!patient) {
-      console.log("[Patients] Patient not found:", selectedPatientId);
       return null;
     }
-
-    console.log("[Patients] Rendering modal for:", selectedPatientId, "encounters:", woundEncounters.length, "loading:", detailLoading);
 
     return (
       <PatientDetailModal
@@ -198,7 +192,6 @@ export default function PatientsPage() {
         isLoading={detailLoading}
         open={detailModalOpen}
         onOpenChange={(open) => {
-          console.log("[Patients] Modal state changed to:", open);
           setDetailModalOpen(open);
         }}
         facilityId={facilityId || ''}
@@ -207,6 +200,22 @@ export default function PatientsPage() {
       />
     );
   };
+
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <Users className="h-8 w-8 text-primary" />
+            Patients
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">Patients seen in the selected date range</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -223,27 +232,35 @@ export default function PatientsPage() {
               : "Patients seen in the selected date range"}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DatePicker
-            date={startDate}
-            setDate={setStartDate}
-            label="Start Date"
-            enabledDates={enabledDates}
-            isLoading={enabledDatesLoading}
-            defaultMonth={startDate || lastEncounterDate}
-          />
-          <span className="text-muted-foreground">to</span>
-          <DatePicker
-            date={endDate}
-            setDate={setEndDate}
-            label="End Date"
-            enabledDates={enabledDates}
-            isLoading={enabledDatesLoading}
-            defaultMonth={endDate || lastEncounterDate}
-          />
-          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={patientsLoading || isFetching}>
-            <RefreshCcw className={cn("h-4 w-4", (patientsLoading || isFetching) && "animate-spin")} />
-          </Button>
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <DatePicker
+              date={startDate}
+              setDate={setStartDate}
+              label="Start Date"
+              enabledDates={enabledDates}
+              isLoading={enabledDatesLoading}
+              defaultMonth={startDate || lastEncounterDate}
+            />
+            <span className="text-muted-foreground">to</span>
+            <DatePicker
+              date={endDate}
+              setDate={setEndDate}
+              label="End Date"
+              enabledDates={enabledDates}
+              isLoading={enabledDatesLoading}
+              defaultMonth={endDate || lastEncounterDate}
+            />
+            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={patientsLoading || isFetching}>
+              <RefreshCcw className={cn("h-4 w-4", (patientsLoading || isFetching) && "animate-spin")} />
+            </Button>
+          </div>
+          {/* Date Range Info */}
+          {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+            <p className="text-xs text-muted-foreground mt-[5px]">
+              Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+            </p>
+          )}
         </div>
       </div>
 

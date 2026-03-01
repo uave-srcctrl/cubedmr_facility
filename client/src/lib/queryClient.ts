@@ -1,4 +1,18 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, QueryFunction, QueryCache, MutationCache } from "@tanstack/react-query";
+
+/**
+ * Global error handler for queries and mutations
+ * Logs errors and can be extended to show toast notifications
+ */
+function handleQueryError(error: unknown, context?: unknown): void {
+  console.error('[QueryClient] Error:', error);
+  
+  // Check for authentication errors
+  if (error instanceof Error && error.message.includes('401')) {
+    console.warn('[QueryClient] Authentication error detected');
+    // Could dispatch auth event here if needed
+  }
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -42,6 +56,12 @@ export const getQueryFn: <T>(options: {
   };
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: handleQueryError,
+  }),
+  mutationCache: new MutationCache({
+    onError: handleQueryError,
+  }),
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LOCAL_API } from "@/lib/api-config";
 import { useAuth } from "./use-auth";
 import { useCallback, useEffect, useState } from "react";
+import { secureStorageSync } from "@/lib/secure-storage";
 
 // ==================== TYPES ====================
 
@@ -379,24 +380,24 @@ function saveLocalSettings(settings: AppSettings): void {
  * Falls back to localStorage if DB is unavailable
  */
 export function useSettings() {
-  const { getToken, getEmail, getSelectedFacility } = useAuth();
+  const { getToken, getEmail } = useAuth();
   const queryClient = useQueryClient();
   
   const token = getToken();
   const email = getEmail();
-  const facilityId = getSelectedFacility();
   
-  // Get userId from localStorage (can be ProviderId or NurseId)
-  const userId = localStorage.getItem("userEntityId");
+  // Get userId from secure storage (can be ProviderId or NurseId)
+  // Settings are USER-based, not facility-based
+  const userId = secureStorageSync.getItem("userEntityId");
   
   const deviceId = localStorage.getItem("deviceId") || "web-settings";
 
   // ==================== FETCH SETTINGS FROM DB ====================
   
   const { data: dbSettings, isLoading, error, refetch } = useQuery<AppSettings | null, Error>({
-    queryKey: ["userSettings", userId, facilityId],
+    queryKey: ["userSettings", userId],
     queryFn: async () => {
-      if (!userId || !facilityId || !token || !email) {
+      if (!userId || !token || !email) {
         console.log('[useSettings] Missing auth params, using local settings');
         return null;
       }
@@ -414,7 +415,6 @@ export function useSettings() {
             email,
             deviceId,
             userId: parseInt(userId),
-            facilityId: parseInt(facilityId),
           }),
         });
 
@@ -445,7 +445,7 @@ export function useSettings() {
         return null;
       }
     },
-    enabled: !!userId && !!facilityId && !!token && !!email,
+    enabled: !!userId && !!token && !!email,
     staleTime: SETTINGS_CACHE_TIME,
     refetchOnWindowFocus: false,
   });
@@ -462,7 +462,7 @@ export function useSettings() {
       // Always save locally first (for immediate feedback)
       saveLocalSettings(newSettings);
 
-      if (!userId || !facilityId || !token || !email) {
+      if (!userId || !token || !email) {
         console.log('[useSettings] Missing auth params, saved locally only');
         return { success: true, local: true };
       }
@@ -480,7 +480,6 @@ export function useSettings() {
             email,
             deviceId,
             userId: parseInt(userId),
-            facilityId: parseInt(facilityId),
             settings: newSettings,
           }),
         });
@@ -504,25 +503,25 @@ export function useSettings() {
     },
     onMutate: async (newSettings) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
-      await queryClient.cancelQueries({ queryKey: ["userSettings", userId, facilityId] });
+      await queryClient.cancelQueries({ queryKey: ["userSettings", userId] });
       
       // Snapshot the previous value
-      const previousSettings = queryClient.getQueryData(["userSettings", userId, facilityId]);
+      const previousSettings = queryClient.getQueryData(["userSettings", userId]);
       
       // Optimistically update the cache immediately
-      queryClient.setQueryData(["userSettings", userId, facilityId], newSettings);
+      queryClient.setQueryData(["userSettings", userId], newSettings);
       
       return { previousSettings };
     },
     onError: (err, newSettings, context) => {
       // If mutation fails, roll back to the previous value
       if (context?.previousSettings) {
-        queryClient.setQueryData(["userSettings", userId, facilityId], context.previousSettings);
+        queryClient.setQueryData(["userSettings", userId], context.previousSettings);
       }
     },
     onSuccess: () => {
       // Invalidate the query to refetch latest settings (confirms DB sync)
-      queryClient.invalidateQueries({ queryKey: ["userSettings", userId, facilityId] });
+      queryClient.invalidateQueries({ queryKey: ["userSettings", userId] });
     },
   });
 

@@ -7,8 +7,8 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Normalizes etiology strings to standard format
- * Converts variations like "Stage II", "Pressure Stage II", "Pressure Ulcer Stage II" 
- * to standardized "Pressure (II)" format
+ * Converts variations like "Stage II", "Pressure Stage II", "Pressure Ulcer Stage II",
+ * "Pressure, Stage IV" to standardized "Pressure (II)" format
  */
 export function normalizeEtiology(etiology: string | null | undefined): string {
   if (!etiology) return 'Unknown';
@@ -27,6 +27,16 @@ export function normalizeEtiology(etiology: string | null | undefined): string {
     const stageOnlyMatch = e.match(/^stage\s+(iv|iii|ii|i|unstageable|dti)$/i);
     if (stageOnlyMatch) {
       const stage = stageOnlyMatch[1].toUpperCase();
+      return `Pressure (${stage === 'UNSTAGEABLE' ? 'Unstageable' : stage === 'DTI' ? 'DTI' : stage})`;
+    }
+    
+    // Handle "Pressure, Stage IV", "Pressure, Stage III", etc. (with comma)
+    const pressureCommaStageMatch = e.match(/pressure[,\s]+stage\s+(iv|iii|ii|i|4|3|2|1|unstageable|dti)/i);
+    if (pressureCommaStageMatch) {
+      let stage = pressureCommaStageMatch[1].toUpperCase();
+      // Convert numeric to roman numerals
+      const romanMap: Record<string, string> = { '1': 'I', '2': 'II', '3': 'III', '4': 'IV' };
+      if (romanMap[stage]) stage = romanMap[stage];
       return `Pressure (${stage === 'UNSTAGEABLE' ? 'Unstageable' : stage === 'DTI' ? 'DTI' : stage})`;
     }
     
@@ -95,4 +105,74 @@ export function getEtiologyColor(etiology: string | null | undefined): string {
   }
   
   return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+/**
+ * Format a date string for display
+ * Centralizes date formatting to ensure consistency across the application
+ * 
+ * @param dateStr - The date string to format (ISO format or parseable date string)
+ * @param options - Optional Intl.DateTimeFormatOptions for custom formatting
+ * @returns Formatted date string or '--' if invalid/null
+ * 
+ * @example
+ * ```typescript
+ * formatDate('2026-02-28') // "February 28, 2026"
+ * formatDate('2026-02-28', { month: 'short' }) // "Feb 28, 2026"
+ * formatDate(null) // "--"
+ * ```
+ */
+export function formatDate(
+  dateStr: string | null | undefined,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (!dateStr) return '--';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', options ?? {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * Format a date string with time included
+ * 
+ * @param dateStr - The date string to format
+ * @returns Formatted date and time string or '--' if invalid/null
+ */
+export function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '--';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * Format a date for short display (e.g., in charts, tables)
+ * 
+ * @param dateStr - The date string to format
+ * @returns Short formatted date string (e.g., "Feb 28")
+ */
+export function formatDateShort(dateStr: string | null | undefined): string {
+  if (!dateStr) return '--';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
 }

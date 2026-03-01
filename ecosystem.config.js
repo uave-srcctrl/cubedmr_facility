@@ -26,6 +26,8 @@ module.exports = {
       // Environment variables
       env: {
         NODE_ENV: "production",
+        PORT: 5000,
+        HOST: "127.0.0.1",
       },
       
       // Number of instances (1 = single process, 'max' = use all CPU cores)

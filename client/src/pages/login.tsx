@@ -18,14 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
-
-// Helper function to compute SHA256 hash
-async function sha256(str: string): Promise<string> {
-  const buffer = new TextEncoder().encode(str);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => ('00' + b.toString(16)).slice(-2)).join('');
-}
+import { sha256 } from "@/lib/crypto-utils";
 
 const formSchema = z.object({
   identifier: z.string().email("Please enter a valid email address."),
@@ -40,6 +33,7 @@ interface LoginProps {
 
 export default function Login({ onLogin }: LoginProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isSendingOTC, setIsSendingOTC] = useState(false);
   const { toast } = useToast();
   const { isAuthenticated } = useAuth();
 
@@ -79,12 +73,11 @@ export default function Login({ onLogin }: LoginProps) {
         localStorage.setItem("deviceId", deviceId);
       }
 
-      console.log("[Login] Submitting facility login with email:", email, "- Entity:", entity, "- DeviceId:", deviceId);
+      // Login flow initiated
       
       // Replicate EXACT Dart flow:
       // Step 1: In authenticate(), Dart does: SHA256(password)
       let firstHash = await sha256(values.password);
-      console.log("[Login] Step 1 - SHA256(password):", firstHash);
       /*
       // Special hardcoded hash for drperez@curisec.com
       if (email.toLowerCase() === "drperez@curisec.com") {
@@ -95,9 +88,6 @@ export default function Login({ onLogin }: LoginProps) {
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
       const salt = `${email}38457487${deviceId}`;
       const encountertrackid = await sha256(salt);
-      console.log("[Login] Step 2 - SHA256(salt):", encountertrackid);
-      console.log("[Login] Step 2 - Salt formula: email + '38457487' + deviceId");
-      console.log("[Login] Step 2 - Salt value:", salt);
       
       const response = await fetch(LOCAL_API.LOGIN, {
         method: "POST",
@@ -114,13 +104,8 @@ export default function Login({ onLogin }: LoginProps) {
         }),
       });
 
-      console.log("[Login] Response status:", response.status);
-      
       const text = await response.text();
-      console.log("[Login] Raw response text:", text);
-      
       const data = JSON.parse(text);
-      console.log("[Login] Response data:", data);
 
       // Check if authentication was successful
       // The backend returns: { status: true, data: [{ status: 1, token, entityId, entity, entityName, facilities, msg }] }
@@ -128,8 +113,13 @@ export default function Login({ onLogin }: LoginProps) {
       const dataItem = data.data && data.data[0];
       
       // Check if there's an active session (status: 0, reason: 1 = "Facility currently authenticated")
+      // If the response includes a valid token, use it directly instead of retrying
       if (dataItem?.status === 0 && dataItem?.reason === 1) {
-        console.log("[Login] Active session detected, attempting to retry with different device ID...");
+        // If backend returned a valid token, use it directly
+        if (dataItem?.token) {
+          processLoginSuccess(dataItem, values.identifier);
+          return;
+        }
         
         // Retry up to 3 times with different device IDs
         let retryCount = 0;
@@ -141,8 +131,6 @@ export default function Login({ onLogin }: LoginProps) {
           // Generate a new device ID
           const newDeviceId = "web-" + Math.random().toString(36).substr(2, 9);
           localStorage.setItem("deviceId", newDeviceId);
-          
-          console.log(`[Login] Retry ${retryCount}/${maxRetries} with device ID:`, newDeviceId);
           
           // Recalculate hashes for new deviceId
           const newSalt = `${email}38457487${newDeviceId}`;
@@ -168,13 +156,11 @@ export default function Login({ onLogin }: LoginProps) {
           
           const retryText = await retryResponse.text();
           const retryData = JSON.parse(retryText);
-          console.log(`[Login] Retry ${retryCount} response:`, retryData);
           
           const retryItem = retryData.data && retryData.data[0];
           
           // Check if we got "Too many attempts" - this means we hit rate limiting
           if (retryItem?.reason === 5) {
-            console.log("[Login] Rate limiting triggered, stopping retries");
             toast({
               title: "Too many login attempts",
               description: retryItem?.msg || "Please wait 5 minutes before trying again.",
@@ -183,12 +169,11 @@ export default function Login({ onLogin }: LoginProps) {
             return;
           }
           
-          if (retryData.status === true && retryItem?.status === 1) {
-            console.log("[Login] Retry successful on attempt " + retryCount);
+          // Success if: 1) Normal login success, or 2) Already authenticated with a valid token
+          if ((retryData.status === true && retryItem?.status === 1) || 
+              (retryItem?.status === 0 && retryItem?.reason === 1 && retryItem?.token)) {
             processLoginSuccess(retryItem, values.identifier);
             return;
-          } else {
-            console.log(`[Login] Retry ${retryCount} failed:`, retryItem?.msg);
           }
         }
         
@@ -204,7 +189,6 @@ export default function Login({ onLogin }: LoginProps) {
       
       // Check for rate limiting (reason: 5 = "Too many attempts in the last 5 minutes")
       if (dataItem?.status === 0 && dataItem?.reason === 5) {
-        console.log("[Login] Rate limiting triggered");
         toast({
           title: "Too many login attempts",
           description: dataItem?.msg || "Please wait 5 minutes before trying again.",
@@ -249,6 +233,59 @@ export default function Login({ onLogin }: LoginProps) {
     }
   }
 
+  async function requestOneTimeCode() {
+    const email = form.getValues("identifier");
+    
+    if (!email || !email.includes("@")) {
+      toast({
+        title: "Email required",
+        description: "Please enter a valid email address first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSendingOTC(true);
+    try {
+      const response = await fetch(LOCAL_API.LOGIN, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          entity: "getOneTimeCode",
+          email: email,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.status === true) {
+        toast({
+          title: "Code Sent",
+          description: "A one-time code has been sent to your email. Use it as your password.",
+          variant: "success",
+        });
+      } else {
+        const errorMsg = data.data?.[0]?.msg || data.error || "Failed to send code.";
+        toast({
+          title: "Error",
+          description: errorMsg,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("[Login] OTC Error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to send one-time code.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingOTC(false);
+    }
+  }
+
   function processLoginSuccess(dataItem: any, email: string) {
     console.log("[Login] Authentication successful!");
     
@@ -274,11 +311,7 @@ export default function Login({ onLogin }: LoginProps) {
       facilities.length > 0 ? facilities : []
     );
     
-    console.log("[Login] Initial auth info stored:", {
-      email,
-      facilityId,
-      facilitiesCount: facilities.length,
-    });
+    // Auth info stored, proceeding with user data loading
     
     // Flutter-like flow: Load complete user data and facilities
     loadUserDataAndFacilities(email);
@@ -422,7 +455,7 @@ export default function Login({ onLogin }: LoginProps) {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full mt-4 font-semibold" disabled={isLoading}>
+              <Button type="submit" className="w-full mt-4 font-semibold" disabled={isLoading || isSendingOTC}>
                 {isLoading ? (
                   <div className="flex items-center gap-2">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -433,6 +466,22 @@ export default function Login({ onLogin }: LoginProps) {
                     <Lock className="h-4 w-4" />
                     Sign In
                   </div>
+                )}
+              </Button>
+              <Button 
+                type="button" 
+                variant="outline" 
+                className="w-full mt-2 font-medium"
+                disabled={isLoading || isSendingOTC}
+                onClick={requestOneTimeCode}
+              >
+                {isSendingOTC ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Sending code...
+                  </div>
+                ) : (
+                  "Send One-Time Code"
                 )}
               </Button>
             </form>

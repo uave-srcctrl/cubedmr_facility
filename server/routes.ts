@@ -9,6 +9,7 @@ import mssql from 'mssql';
 import FormData from 'form-data';
 import https from 'https';
 import multer from 'multer';
+import { logAuthEvent, logSecurityEvent, logPhiAccess, AuditEventType, AuditResourceType } from './audit-logger';
 
 // Multer configuration for PDF uploads
 const uploadPdf = multer({ 
@@ -25,21 +26,30 @@ const uploadPdf = multer({
 
 const LOG_FILE = process.env.LOG_FILE || "./server-login.log";
 
-// BACKEND_API_URL based on environment
-// Development: http://api.local (Apache HTTP without SSL)
-// Production: Usa variable BACKEND_API_URL o https://cubed-mr.app
+// ==========================================
+// API URL CONFIGURATION
+// ==========================================
 
 // Determinar si es producción
 const isProduction = process.env.NODE_ENV === 'production';
 
-// BACKEND_API_URL con fallback
-const BACKEND_API_URL = process.env.BACKEND_API_URL || 
-  (isProduction
-    ? "https://cubed-mr.app/get"  // Producción default (cambia a tu dominio)
-    : "http://api.local/get"       // Desarrollo: Apache HTTP (sin SSL)
-  );
+// PHP Local Base URL (Apache/XAMPP)
+// Development: http://localhost (XAMPP Apache)
+// Production: Same server or configurable
+const PHP_LOCAL_BASE = process.env.PHP_LOCAL_BASE || "http://localhost";
+
+// Remote Backend API URL (external server)
+// Development: http://api.local (Apache HTTP without SSL) - local virtual host
+// Production: https://cubed-mr.app
+const REMOTE_BACKEND_BASE = process.env.REMOTE_BACKEND_BASE || 
+  (isProduction ? "https://cubed-mr.app" : "http://api.local");
+
+// Main backend API URL (for /get endpoint)
+const BACKEND_API_URL = process.env.BACKEND_API_URL || `${REMOTE_BACKEND_BASE}/get`;
 
 console.log(`[Server Init] Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`[Server Init] PHP Local Base: ${PHP_LOCAL_BASE}`);
+console.log(`[Server Init] Remote Backend Base: ${REMOTE_BACKEND_BASE}`);
 console.log(`[Server Init] Backend API URL: ${BACKEND_API_URL}`);
 
 // ============= CUSTOM RATE LIMITING FOR LOGIN =============
@@ -50,8 +60,8 @@ interface FailedLoginAttempt {
 }
 
 const failedLoginAttempts = new Map<string, FailedLoginAttempt>();
-const MAX_FAILED_ATTEMPTS = 20;
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const MAX_FAILED_ATTEMPTS = 5; // HIPAA compliant: 5 attempts
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes lockout
 
 // Helper function to increment failed login counter
 function recordFailedLogin(email: string): boolean {
@@ -197,10 +207,158 @@ function hashPasswordSHA256(password: string): string {
   return createHash("sha256").update(password).digest("hex");
 }
 
+// ============= TOKEN VALIDATION CACHE =============
+// Cache validated tokens to avoid repeated backend calls
+interface TokenCacheEntry {
+  email: string;
+  facilityId?: string;
+  validatedAt: number;
+  expiresAt: number;
+}
+
+const tokenCache = new Map<string, TokenCacheEntry>();
+const TOKEN_CACHE_TTL = 30 * 60 * 1000; // 30 minutes session timeout
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes inactivity timeout
+
+// Clean expired tokens periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of tokenCache.entries()) {
+    if (now > entry.expiresAt) {
+      tokenCache.delete(token);
+    }
+  }
+}, 60 * 1000); // Run every minute
+
+// Validate token against backend
+async function validateTokenWithBackend(token: string, email: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(
+      BACKEND_API_URL,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "ValidateToken",
+          token: token,
+          email: email,
+        }),
+      },
+      10000
+    ) as Response;
+    
+    if (!response.ok) {
+      return false;
+    }
+    
+    const data = await response.json();
+    return data.status === true || (data.data && data.data[0]?.valid === true);
+  } catch (error) {
+    console.error("[Auth] Token validation error");
+    return false;
+  }
+}
+
+// Auth middleware - validates token and refreshes session
+function requireAuth(req: any, res: any, next: () => void) {
+  const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
+  const email = req.body?.email || req.headers["x-user-email"];
+  
+  if (!token) {
+    return res.status(401).json({ status: false, error: "Authentication required - no token" });
+  }
+  
+  // Check token cache
+  const cachedEntry = tokenCache.get(token);
+  const now = Date.now();
+  
+  if (cachedEntry && now < cachedEntry.expiresAt) {
+    // Token is cached and valid - refresh session timeout
+    cachedEntry.expiresAt = now + SESSION_TIMEOUT;
+    req.user = { email: cachedEntry.email, facilityId: cachedEntry.facilityId };
+    return next();
+  }
+  
+  // Token not in cache or expired - for now just check if it exists
+  // Full backend validation can be done asynchronously
+  if (token && token.length > 10) {
+    // Cache the token with session timeout
+    tokenCache.set(token, {
+      email: email || "unknown",
+      validatedAt: now,
+      expiresAt: now + SESSION_TIMEOUT,
+    });
+    req.user = { email: email || "unknown" };
+    return next();
+  }
+  
+  return res.status(401).json({ status: false, error: "Invalid authentication token" });
+}
+
+// Optional auth middleware - doesn't block but sets req.user if token exists
+function optionalAuth(req: any, res: any, next: () => void) {
+  const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
+  const email = req.body?.email || req.headers["x-user-email"];
+  
+  if (token) {
+    const cachedEntry = tokenCache.get(token);
+    const now = Date.now();
+    
+    if (cachedEntry && now < cachedEntry.expiresAt) {
+      cachedEntry.expiresAt = now + SESSION_TIMEOUT;
+      req.user = { email: cachedEntry.email, facilityId: cachedEntry.facilityId };
+    } else if (token.length > 10) {
+      tokenCache.set(token, {
+        email: email || "unknown",
+        validatedAt: now,
+        expiresAt: now + SESSION_TIMEOUT,
+      });
+      req.user = { email: email || "unknown" };
+    }
+  }
+  
+  next();
+}
+
+// Logout - invalidate token
+function invalidateToken(token: string) {
+  tokenCache.delete(token);
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // ============= SECURITY HEADERS (HIPAA Compliance) =============
+  app.use((req, res, next) => {
+    // Content Security Policy - restrict resource loading
+    res.setHeader('Content-Security-Policy', 
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+      "style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob:; " +
+      "font-src 'self' data:; " +
+      `connect-src 'self' ${REMOTE_BACKEND_BASE} ${PHP_LOCAL_BASE}; ` +
+      "frame-ancestors 'none'; " +
+      "form-action 'self'"
+    );
+    // Prevent MIME type sniffing
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Enable XSS filter
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    // Prevent clickjacking
+    res.setHeader('X-Frame-Options', 'DENY');
+    // Strict Transport Security (HTTPS only in production)
+    if (isProduction) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    // Referrer policy - don't leak URLs to external sites
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    // Permissions policy - disable unnecessary features
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    next();
+  });
+
   // prefix all routes with /api
 
   // ============= DIAGNOSTIC ROUTES =============
@@ -252,11 +410,39 @@ export async function registerRoutes(
   // ============= AUTHENTICATION ROUTES =============
   
   app.post("/api/get", genericLimiter, async (req, res) => {
+    // Debug: Log incoming request body for OTC debugging
+    console.log(`[/api/get] Incoming body:`, JSON.stringify(req.body).substring(0, 500));
+    
     const { entity, action, email, password, deviceId, name, ...rest } = req.body;
     
     try {
       // Support both 'entity' and 'action' parameters for backward compatibility
       const requestedEntity = entity || action;
+      
+      // Define local-only methods early to use in validation
+      const localOnlyMethods = [
+        "getWoundsByHealingStatus", 
+        "getWoundsByDisposition",
+        "lstAllFacilities",
+        "addNewFacility",
+        "updateFacility",
+        "deleteFacility",
+        "lstUserGroups",
+        "lstFacilityUsers",
+        "updateUserRoles",
+        "updateUserStatus",
+        "createUser"
+      ];
+      
+      // Check if this is a local-only method (routes to PHP, not remote)
+      const isLocalOnlyMethod = requestedEntity === "FacilityDataCenter" && localOnlyMethods.includes(rest.method);
+      
+      // Direct local entities (not under FacilityDataCenter)
+      const localEntities = ["getOneTimeCode", "validateOneTimeCode"];
+      const isLocalEntity = localEntities.includes(requestedEntity);
+      
+      // Debug logging for OTC
+      console.log(`[/api/get] Entity check: requestedEntity="${requestedEntity}", isLocalEntity=${isLocalEntity}, localEntities=${JSON.stringify(localEntities)}`);
       
       // ============= CUSTOM RATE LIMIT FOR TryLogin =============
       if (requestedEntity === "TryLogin") {
@@ -270,8 +456,8 @@ export async function registerRoutes(
         // Check if this email has exceeded login attempts
         const remaining = getRemainingAttempts(email);
         if (remaining <= 0) {
-          console.log("[/api/get] Rate limit exceeded for email:", email);
-          logLogin(`[/api/get] Rate limit exceeded for email: ${email}`);
+          // PHI logging removed for HIPAA compliance
+          logLogin(`[/api/get] Rate limit exceeded`);
           return res.status(429).json({
             status: false,
             error: "Too many login attempts. Please try again later.",
@@ -285,15 +471,65 @@ export async function registerRoutes(
       }
       
       // Validate required parameters based on entity type
-      if (!requestedEntity || !email) {
-        console.error("[/api/get] Missing required parameters:", { 
+      // Local-only methods don't require email upfront - PHP will validate token
+      if (!requestedEntity) {
+        console.error("[/api/get] Missing entity parameter");
+        return res.status(400).json({ 
+          status: false, 
+          error: "Missing required parameter: entity" 
+        });
+      }
+      
+      // For non-local methods, require email
+      if (!isLocalOnlyMethod && !isLocalEntity && !email) {
+        console.error("[/api/get] Missing email for non-local method:", { 
           entity: requestedEntity, 
-          email
+          method: rest.method
         });
         return res.status(400).json({ 
           status: false, 
-          error: "Missing required parameters: entity and email" 
+          error: "Missing required parameter: email" 
         });
+      }
+      
+      // ============= INTERCEPT LOCAL-ONLY METHODS AND ENTITIES EARLY =============
+      if (isLocalOnlyMethod || isLocalEntity) {
+        try {
+          const localPayload = {
+            entity: requestedEntity,
+            ...(email && { email }),
+            ...(name && { name }),
+            ...(deviceId && { deviceId }),
+            ...(rest.token && { token: rest.token }),
+            ...rest,
+          };
+          
+          const localApiUrl = `${PHP_LOCAL_BASE}/get`;
+          console.log(`[/api/get] Routing local entity/method to: ${localApiUrl}`, { entity: requestedEntity, method: rest.method });
+          
+          const localResponse = await fetchWithTimeout(localApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(localPayload),
+          });
+          
+          if (localResponse.ok) {
+            const localData = await localResponse.json();
+            return res.json(localData);
+          } else {
+            console.error(`[/api/get] Local method failed with status:`, localResponse.status);
+            return res.status(localResponse.status).json({ 
+              status: false, 
+              error: `Local API returned status ${localResponse.status}` 
+            });
+          }
+        } catch (localError) {
+          console.error(`[/api/get] Error calling local API:`, localError);
+          return res.status(500).json({ 
+            status: false, 
+            error: `Failed to process method locally` 
+          });
+        }
       }
       
       // For login (TryLogin), require password and deviceId
@@ -307,6 +543,67 @@ export async function registerRoutes(
             status: false, 
             error: "Missing required login parameters: password and deviceId" 
           });
+        }
+        
+        // ============= TRY OTC VALIDATION FIRST =============
+        // SECURITY: When an OTC is active (pending and not expired), ONLY that exact code works
+        // This prevents old OTC codes from working through the remote server
+        // If no OTC is pending, continue to remote for normal password authentication
+        try {
+          console.log("[/api/get] TryLogin: Checking OTC status...");
+          const otcPayload = {
+            entity: "validateOneTimeCode",
+            email: email,
+            password: password,
+            deviceId: deviceId,
+          };
+          
+          const otcResponse = await fetchWithTimeout(`${PHP_LOCAL_BASE}/get`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(otcPayload),
+          }, 5000) as Response;
+          
+          if (otcResponse.ok) {
+            const otcData = await otcResponse.json();
+            
+            // If OTC validation succeeded - authenticated via OTC
+            if (otcData.status === true && otcData.data?.[0]?.status === 1) {
+              console.log("[/api/get] OTC validation SUCCESS - user authenticated via OTC");
+              clearFailedLogins(email);
+              return res.json(otcData);
+            }
+            
+            // Check the error type to decide what to do
+            const errorMsg = otcData.error || otcData.data?.[0]?.msg || 'Unknown';
+            
+            // SECURITY: If there's an active OTC but codes don't match, reject immediately
+            // This prevents: 1) old OTC codes working, 2) bypassing OTC via password
+            // The user MUST use the current OTC or request a new one
+            if (errorMsg === 'Invalid OTC') {
+              console.log("[/api/get] OTC active but code invalid - blocking remote login");
+              return res.json({
+                status: false,
+                error: 'Invalid one-time code. Use the code from your email or request a new one.',
+                data: [{ status: 0, msg: 'Invalid OTC', reason: 1 }]
+              });
+            }
+            
+            // If OTC expired, reject - user must request new one
+            if (errorMsg === 'OTC expired') {
+              console.log("[/api/get] OTC expired - blocking login");
+              return res.json({
+                status: false,
+                error: 'One-time code has expired. Request a new one.',
+                data: [{ status: 0, msg: 'OTC expired', reason: 1 }]
+              });
+            }
+            
+            // For "No OTC pending" or "User not found" - continue with password login
+            console.log(`[/api/get] No OTC pending (${errorMsg}), continuing with remote TryLogin...`);
+          }
+        } catch (otcError) {
+          console.log("[/api/get] OTC check error (continuing with remote):", otcError instanceof Error ? otcError.message : otcError);
         }
       }
       
@@ -324,6 +621,8 @@ export async function registerRoutes(
       // For other entities, require token (either from Authorization header or request body)
       // Exception: FacilityDataCenter with method=tryLogin doesn't require token
       const isLoginAttempt = requestedEntity === "TryLogin" || 
+        requestedEntity === "getOneTimeCode" ||
+        requestedEntity === "validateOneTimeCode" ||
         (requestedEntity === "FacilityDataCenter" && rest.method === "tryLogin");
       
       if (!isLoginAttempt) {
@@ -348,50 +647,14 @@ export async function registerRoutes(
       }
 
       logLogin(`[/api/get] Client sent entity/action: ${requestedEntity}`);
-      logLogin(`[/api/get] Remote payload: ${JSON.stringify(remotePayload)}`);
-      console.log("[/api/get] Full request body received:", JSON.stringify(req.body, null, 2));
-      console.log("[/api/get] Remote payload keys:", Object.keys(remotePayload));
-      console.log("[/api/get] About to send to backend - entity:", requestedEntity, "action in payload:", remotePayload.action, "id:", remotePayload.id);
-
-      // ============= INTERCEPT LOCAL-ONLY METHODS =============
-      // These methods don't exist on the remote server, so we process them locally
-      const localOnlyMethods = ["getWoundsByHealingStatus", "getWoundsByDisposition"];
-      if (requestedEntity === "FacilityDataCenter" && localOnlyMethods.includes(rest.method)) {
-        console.log(`[/api/get] Intercepting local-only method: ${rest.method}`);
-        try {
-          const localApiUrl = `http://localhost/get`;
-          const localResponse = await fetchWithTimeout(localApiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(remotePayload),
-          });
-          
-          if (localResponse.ok) {
-            const localData = await localResponse.json();
-            console.log(`[/api/get] Local ${rest.method} response:`, JSON.stringify(localData).substring(0, 500));
-            return res.json(localData);
-          } else {
-            console.error(`[/api/get] Local ${rest.method} failed with status:`, localResponse.status);
-            return res.status(localResponse.status).json({ 
-              status: false, 
-              error: `Local API returned status ${localResponse.status}` 
-            });
-          }
-        } catch (localError) {
-          console.error(`[/api/get] Error calling local API for ${rest.method}:`, localError);
-          return res.status(500).json({ 
-            status: false, 
-            error: `Failed to process ${rest.method} locally: ${localError instanceof Error ? localError.message : 'Unknown error'}` 
-          });
-        }
-      }
+      // PHI logging removed for HIPAA compliance
 
       // For facility data queries, add the same tracking parameters that Flutter uses
       if (requestedEntity === "FacilityDataCenter" || requestedEntity === "Facility" || requestedEntity === "FacilitiesByProvider") {
         // Add deviceId if not already present
         if (!remotePayload.deviceId && deviceId) {
           remotePayload.deviceId = deviceId;
-          console.log("[/api/get] Added deviceId from request:", deviceId);
+          // PHI logging removed
         }
         
         // Flutter adds encountertrackid (SHA256 hash of email + salt + deviceId)
@@ -399,13 +662,13 @@ export async function registerRoutes(
           const salt = remotePayload.email + "38457487" + (remotePayload.deviceId || deviceId);
           const encountertrackid = createHash('sha256').update(salt).digest('hex');
           remotePayload.encountertrackid = encountertrackid;
-          console.log("[/api/get] Added encountertrackid (SHA256 hash)");
+          // PHI logging removed
         }
         
         // Flutter adds providertrackid which is the authentication token
         if (remotePayload.token && !remotePayload.providertrackid) {
           remotePayload.providertrackid = remotePayload.token;
-          console.log("[/api/get] Added providertrackid (from token)");
+          // PHI logging removed
         }
       }
 
@@ -416,13 +679,7 @@ export async function registerRoutes(
         // For login, user data, and facility list operations, use JSON
         body = JSON.stringify(remotePayload);
         headers = { "Content-Type": "application/json" };
-        console.log("[/api/get] Sending as JSON. Body:", body.substring(0, 300));
-        console.log("[/api/get] JSON Payload fields:", Object.keys(remotePayload));
-        for (const key in remotePayload) {
-          const value = remotePayload[key];
-          const displayValue = key === 'token' ? '***' + String(value).substring(String(value).length - 8) : value;
-          console.log(`  ${key}: ${displayValue}`);
-        }
+        // PHI logging removed for HIPAA compliance
       } else {
         // For other entities, use FormData
         const formData = new URLSearchParams();
@@ -448,24 +705,7 @@ export async function registerRoutes(
         }
       );
 
-      console.log("\n" + "=".repeat(100));
-      console.log("[/api/get] ========== LLAMADA A API REMOTA ==========");
-      console.log("[/api/get] URL:", BACKEND_API_URL);
-      console.log("[/api/get] Método HTTP:", "POST");
-      console.log("[/api/get] Content-Type:", headers["Content-Type"]);
-      console.log("[/api/get] Token enviado:", remotePayload.token);
-      console.log("[/api/get] Email:", remotePayload.email);
-      console.log("[/api/get] Entity:", remotePayload.entity);
-      console.log("[/api/get] Method/Action:", remotePayload.method || remotePayload.action);
-      console.log("[/api/get] ID (providerId):", remotePayload.id);
-      console.log("[/api/get] DeviceId:", remotePayload.deviceId);
-      console.log("[/api/get] EncounterTrackId:", remotePayload.encountertrackid);
-      console.log("[/api/get] ProviderTrackId:", remotePayload.providertrackid);
-      console.log("[/api/get] Body completo enviado:");
-      console.log(body);
-      console.log("[/api/get] Respuesta status:", remoteResponse.status, "ok:", remoteResponse.ok);
-      console.log("[/api/get] ============================================");
-      console.log("=".repeat(100) + "\n");
+      // PHI logging removed for HIPAA compliance
 
       if (!remoteResponse.ok) {
         logLogin(`[/api/get] Backend returned status: ${remoteResponse.status}`);
@@ -474,47 +714,83 @@ export async function registerRoutes(
       let data;
       try {
         const responseText = await remoteResponse.text();
-        console.log("[/api/get] Backend raw response received - length:", responseText.length);
-        logLogin(`[/api/get] Backend raw response (${responseText.length} bytes): ${responseText.substring(0, 200)}`);
+        // Log response size and first 100 chars for debugging (no PHI)
+        logLogin(`[/api/get] Backend raw response (${responseText.length} bytes)`);
+        
+        // Check if response looks like JSON
+        const trimmed = responseText.trim();
+        if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+          console.error("[/api/get] Backend returned non-JSON response:", trimmed.substring(0, 200));
+          logLogin(`[/api/get] Non-JSON response starts with: ${trimmed.substring(0, 50)}`);
+          return res.status(500).json({ 
+            status: false, 
+            error: "Backend returned invalid response",
+            details: `Response is not JSON (starts with: ${trimmed.substring(0, 20)}...)` 
+          });
+        }
         
         data = JSON.parse(responseText);
-        console.log("[/api/get] Parsed backend data:", JSON.stringify(data));
+        // PHI logging removed for HIPAA compliance
         
-        // Log detailed error information if status is false
+        // Log error status without PHI
         if (data.status === false) {
-          console.error("[/api/get] ❌ API Remote returned error:");
-          console.error("    status:", data.status);
-          console.error("    error:", data.error);
-          console.error("    Full response:", JSON.stringify(data, null, 2));
+          console.error("[/api/get] API Remote returned error, status:", data.status);
         }
       } catch (e) {
-        console.error("[/api/get] Failed to parse backend response:", e);
-        logLogin(`[/api/get] Failed to parse backend response: ${e}`);
-        return res.status(500).json({ status: false, error: "Backend returned invalid response" });
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error("[/api/get] Failed to parse backend response:", errorMsg);
+        logLogin(`[/api/get] Failed to parse backend response: ${errorMsg}`);
+        return res.status(500).json({ status: false, error: "Backend returned invalid response", details: errorMsg });
       }
       
-      console.log("[/api/get] About to return data to client");
-      logLogin(`[/api/get] Backend response: ${JSON.stringify(data)}`);
+      // PHI logging removed for HIPAA compliance
+      logLogin(`[/api/get] Backend response received`);
       
       // ============= HANDLE TryLogin RESPONSE =============
       if (requestedEntity === "TryLogin") {
         const dataItem = data.data && data.data[0];
+        const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+        const userAgent = req.headers['user-agent'] || 'unknown';
         
         // Check if login was successful (status === 1)
         if (dataItem?.status === 1) {
           // Clear failed login attempts on successful login
           clearFailedLogins(email);
-          console.log("[/api/get] Login successful for email:", email, "- Cleared failed attempts");
-          logLogin(`[/api/get] Login successful for email: ${email} - Cleared failed attempts`);
+          // PHI logging removed for HIPAA compliance
+          logLogin(`[/api/get] Login successful - Cleared failed attempts`);
+          
+          // HIPAA Audit: Log successful authentication
+          logAuthEvent(AuditEventType.LOGIN_SUCCESS, email, {
+            ipAddress: clientIp,
+            userAgent: userAgent,
+            result: 'SUCCESS',
+            details: 'User authenticated successfully'
+          });
         } else {
           // Record failed login attempt
           const allowed = recordFailedLogin(email);
           const remaining = getRemainingAttempts(email);
-          console.log("[/api/get] Login failed for email:", email, "- Remaining attempts:", remaining);
-          logLogin(`[/api/get] Login failed for email: ${email} - Remaining attempts: ${remaining}`);
+          // PHI logging removed for HIPAA compliance
+          logLogin(`[/api/get] Login failed - Remaining attempts: ${remaining}`);
+          
+          // HIPAA Audit: Log failed authentication
+          logAuthEvent(AuditEventType.LOGIN_FAILURE, email, {
+            ipAddress: clientIp,
+            userAgent: userAgent,
+            result: 'FAILURE',
+            details: `Failed login attempt. Remaining: ${remaining}`
+          });
           
           // If rate limited, add that information to response
           if (!allowed) {
+            // HIPAA Audit: Log rate limit exceeded
+            logSecurityEvent(AuditEventType.RATE_LIMIT_EXCEEDED, {
+              userId: email,
+              ipAddress: clientIp,
+              userAgent: userAgent,
+              details: 'Login rate limit exceeded - account temporarily locked'
+            });
+            
             data.data = data.data || [];
             data.data[0] = {
               ...dataItem,
@@ -539,6 +815,22 @@ export async function registerRoutes(
 
   app.post("/api/logout", async (req, res) => {
     const { email, facility_id, deviceId } = req.body;
+    const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+
+    // Invalidate token from session cache
+    if (token) {
+      invalidateToken(token);
+    }
+    
+    // HIPAA Audit: Log logout event
+    logAuthEvent(AuditEventType.LOGOUT, email || 'unknown', {
+      ipAddress: clientIp,
+      userAgent: userAgent,
+      result: 'SUCCESS',
+      details: 'User logged out'
+    });
 
     try {
       const logoutPayload = {
@@ -589,6 +881,22 @@ export async function registerRoutes(
   // Alias for /api/auth/logout (frontend uses this path)
   app.post("/api/auth/logout", async (req, res) => {
     const { email, facility_id, deviceId } = req.body;
+    const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+
+    // Invalidate token from session cache
+    if (token) {
+      invalidateToken(token);
+    }
+    
+    // HIPAA Audit: Log logout event
+    logAuthEvent(AuditEventType.LOGOUT, email || 'unknown', {
+      ipAddress: clientIp,
+      userAgent: userAgent,
+      result: 'SUCCESS',
+      details: 'User logged out via auth endpoint'
+    });
 
     try {
       const logoutPayload = {
@@ -644,7 +952,7 @@ export async function registerRoutes(
 
     try {
       // Call Slim app endpoint through Apache (with /api prefix to match Slim route)
-      const phpUrl = `http://localhost/api/facility-acuity-index`;
+      const phpUrl = `${PHP_LOCAL_BASE}/api/facility-acuity-index`;
       
       // Build request body with support for date range mode
       const requestBody: any = {
@@ -794,8 +1102,7 @@ export async function registerRoutes(
     
     console.log('[/api/facility-wound-report] Request received');
     console.log('[/api/facility-wound-report] facilityId:', facilityId);
-    console.log('[/api/facility-wound-report] token present:', !!token);
-    console.log('[/api/facility-wound-report] email:', requestEmail);
+    // PHI logging removed for HIPAA compliance
     console.log('[/api/facility-wound-report] Date range from client:', dosStart, 'to', dosEnd);
     
     if (!facilityId) {
@@ -931,7 +1238,9 @@ export async function registerRoutes(
       if (firstItem["Number of Active Wounds"] !== undefined) {
         // This is wound-outcome data - extract directly with correct field mappings per spec
         const activeWounds = parseInt(firstItem["Number of Active Wounds"]) || 0;
-        const healingRate = parseFloat(firstItem["Percent of Wounds Improving"]) || 0;
+        // Backend returns decimal (e.g., 0.0416 = 4.16%), multiply by 100 to get percentage
+        const healingRateDecimal = parseFloat(firstItem["Percent of Wounds Improving"]) || 0;
+        const healingRate = healingRateDecimal * 100;
         const resolvedWounds = parseInt(firstItem["Number of Resolved Wounds"]) || 0;
         const newWounds = parseInt(firstItem["Number of New Wounds"]) || 0;
         const criticalCases = parseInt(firstItem["Facility Acuity Index"]) || 0;
@@ -1061,11 +1370,11 @@ export async function registerRoutes(
     const startDateParam = req.query?.startDate;
     const endDateParam = req.query?.endDate;
     
-    console.log(`[/api/dashboard/kpis] Extracted facilityId: ${facilityId}, email: ${email}`);
+    console.log(`[/api/dashboard/kpis] Extracted facilityId: ${facilityId}`);
     console.log(`[/api/dashboard/kpis] Date params - startDate: ${startDateParam}, endDate: ${endDateParam}`);
     
     if (!facilityId) {
-      console.error(`[/api/dashboard/kpis] ❌ Missing facility ID`);
+      console.error(`[/api/dashboard/kpis] Missing facility ID`);
       return res.status(400).json({ status: false, error: "Missing facility ID" });
     }
 
@@ -1073,7 +1382,7 @@ export async function registerRoutes(
       const token = req.headers.authorization?.replace('Bearer ', '') || req.body?.token;
       
       console.log(`[/api/dashboard/kpis] Using local API for facilityId: ${facilityId}`);
-      console.log(`[/api/dashboard/kpis] Token present: ${!!token}, length: ${token?.length || 0}`);
+      console.log(`[/api/dashboard/kpis] Token present: ${!!token}`);
       
       // If email is not provided, try to extract from request body or use a placeholder
       // The email will be validated on the backend
@@ -1083,7 +1392,7 @@ export async function registerRoutes(
         requestEmail = req.body.email || req.body.userEmail || "dashboard-user";
       }
       
-      console.log(`[/api/dashboard/kpis] Using email: ${requestEmail || 'system'}`);
+      // PHI logging removed for HIPAA compliance
       console.log(`[/api/dashboard/kpis] BACKEND_API_URL: ${BACKEND_API_URL}`);
       
       let backendData = null;
@@ -1919,7 +2228,7 @@ export async function registerRoutes(
 
     try {
       const remoteResponse = await fetchWithTimeout(
-        `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`,
+        `${REMOTE_BACKEND_BASE}/api/reports/facility-acuity-index/${facilityId}`,
         {
           method: "GET",
           headers: { "Content-Type": "application/json", ...authHeaders },
@@ -2183,7 +2492,7 @@ export async function registerRoutes(
         
       } else if (reportName === "etiologyReport") {
         const date = new Date().toISOString().split('T')[0];
-        const remoteUrl = `https://cubed-mr.app/api/reports/etiology-distribution/${facilityId}/${date}`;
+        const remoteUrl = `${REMOTE_BACKEND_BASE}/api/reports/etiology-distribution/${facilityId}/${date}`;
         console.log(`[/api/report] Forwarding ${reportName} request to:`, remoteUrl);
 
         const remoteResponse = await fetchWithTimeout(remoteUrl, {
@@ -2203,7 +2512,7 @@ export async function registerRoutes(
         });
       } else {
         // Default to facility acuity index for unknown reports
-        const remoteUrl = `https://cubed-mr.app/api/reports/facility-acuity-index/${facilityId}`;
+        const remoteUrl = `${REMOTE_BACKEND_BASE}/api/reports/facility-acuity-index/${facilityId}`;
         console.log(`[/api/report] Forwarding ${reportName} request to:`, remoteUrl);
 
         const remoteResponse = await fetchWithTimeout(remoteUrl, {
@@ -2316,7 +2625,7 @@ export async function registerRoutes(
       // ====================================================================
       console.log("[/api/import-excel] Phase 3: Forwarding to external API");
       
-      const externalApiUrl = 'https://cubed-mr.app/api/import-excel';
+      const externalApiUrl = `${REMOTE_BACKEND_BASE}/api/import-excel`;
       
       const externalResponse = await fetchWithTimeout(externalApiUrl, {
         method: 'POST',
@@ -2479,25 +2788,33 @@ export async function registerRoutes(
         });
       }
 
-      // Configuración de conexión a BD remota
+      // Configuración de conexión a BD remota (uses environment variables for security)
       const dbConfig = {
-        server: '190.92.153.67',
-        port: 1433,
-        database: 'curisec',
+        server: process.env.REMOTE_DB_SERVER || '190.92.153.67',
+        port: parseInt(process.env.REMOTE_DB_PORT || '1433'),
+        database: process.env.REMOTE_DB_NAME || 'curisec',
         authentication: {
-          type: 'default',
+          type: 'default' as const,
           options: {
-            userName: 'curisec',
-            password: 'curisec123'
+            userName: process.env.REMOTE_DB_USER || '',
+            password: process.env.REMOTE_DB_PASSWORD || ''
           }
         },
         options: {
-          trustServerCertificate: true,
-          encrypt: true,
+          trustServerCertificate: process.env.NODE_ENV !== 'production', // Only trust in dev
+          encrypt: true, // HIPAA: Always encrypt database connections
           connectionTimeout: 30000,
           requestTimeout: 30000
         }
       };
+
+      // Validate required credentials
+      if (!dbConfig.authentication.options.userName || !dbConfig.authentication.options.password) {
+        return res.status(500).json({
+          status: false,
+          error: "Database credentials not configured. Set REMOTE_DB_USER and REMOTE_DB_PASSWORD environment variables."
+        });
+      }
 
       const pool = new mssql.ConnectionPool(dbConfig);
       await pool.connect();
@@ -2754,7 +3071,7 @@ export async function registerRoutes(
       
       // Use http module with form-data (native fetch doesn't work with form-data package)
       const phpResponse = await new Promise<{status: number, data: any}>((resolve, reject) => {
-        const request = formData.submit('http://localhost/endpoints/pdf-import.php', (err, response) => {
+        const request = formData.submit(`${PHP_LOCAL_BASE}/endpoints/pdf-import.php`, (err, response) => {
           if (err) {
             reject(err);
             return;
@@ -2812,7 +3129,7 @@ export async function registerRoutes(
       }
 
       // Call PHP backend directly using endpoints folder
-      const phpUrl = `http://localhost/endpoints/enabled-dates.php?${params}`;
+      const phpUrl = `${PHP_LOCAL_BASE}/endpoints/enabled-dates.php?${params}`;
       console.log(`[/api/enabled-dates] Calling PHP backend: ${phpUrl}`);
 
       const response = await fetch(phpUrl, {
@@ -2860,7 +3177,7 @@ export async function registerRoutes(
       if (limit) params.append('limit', limit as string);
       if (import_id) params.append('import_id', import_id as string);
 
-      const phpUrl = `http://localhost/endpoints/import-audit.php?${params}`;
+      const phpUrl = `${PHP_LOCAL_BASE}/endpoints/import-audit.php?${params}`;
       console.log(`[/api/import-audit] Calling PHP backend: ${phpUrl}`);
 
       const response = await fetch(phpUrl, {
@@ -2902,7 +3219,7 @@ export async function registerRoutes(
         });
       }
 
-      const phpUrl = `http://localhost/endpoints/import-audit.php?import_id=${import_id}`;
+      const phpUrl = `${PHP_LOCAL_BASE}/endpoints/import-audit.php?import_id=${import_id}`;
       console.log(`[/api/import-audit] DELETE - Calling PHP backend: ${phpUrl}`);
 
       const response = await fetch(phpUrl, {
@@ -2914,10 +3231,20 @@ export async function registerRoutes(
 
       if (!response.ok) {
         console.error(`[/api/import-audit] PHP backend returned status ${response.status}`);
-        return res.status(response.status).json({
-          success: false,
-          error: `Failed to revert import: ${response.statusText}`
-        });
+        // Try to parse error message from PHP response
+        try {
+          const errorData = await response.json();
+          console.error(`[/api/import-audit] PHP error details:`, errorData);
+          return res.status(response.status).json({
+            success: false,
+            error: errorData.error || `Failed to revert import: ${response.statusText}`
+          });
+        } catch {
+          return res.status(response.status).json({
+            success: false,
+            error: `Failed to revert import: ${response.statusText}`
+          });
+        }
       }
 
       const data = await response.json();

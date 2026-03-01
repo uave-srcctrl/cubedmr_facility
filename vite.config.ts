@@ -37,10 +37,15 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
+  // Remove console.log in production builds
+  esbuild: {
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
+  },
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000, // Increase limit to 1MB (default is 500KB)
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         manualChunks: {

@@ -1,5 +1,5 @@
 import { Switch, Route, useLocation } from "wouter";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -7,22 +7,36 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Layout from "@/components/layout";
 import Login from "@/pages/login";
-import Dashboard from "@/pages/dashboard";
-import FacilityWoundReport from "@/pages/facility-wound-report";
-import OutcomeReportGlobal from "@/pages/outcome-report";
-import EtiologyReport from "@/pages/etiology-report";
-import AcuityReport from "@/pages/acuity-report";
-import RoundSummary from "@/pages/round-summary";
-import ExcelImportPage from "@/pages/excel-import";
-import DataImportPage from "@/pages/data-import";
-import SettingsPage from "@/pages/settings";
-import PatientsPage from "@/pages/patients";
 import FacilitySelectorPage from "@/pages/facility-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useLogoutOnUnload } from "@/hooks/use-logout-on-unload";
 import { useLogoutOnBrowserClose } from "@/hooks/use-logout-on-browser-close";
 import { useSingleTabEnforcement } from "@/hooks/use-single-tab-enforcement";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
+import { ImportProvider } from "@/contexts/import-context";
+import { EcgLoader } from "@/components/ecg-loader";
+import { RouteErrorBoundary } from "@/components/route-error-boundary";
+
+// Lazy load pages for better initial bundle size
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const FacilityWoundReport = lazy(() => import("@/pages/facility-wound-report"));
+const OutcomeReportGlobal = lazy(() => import("@/pages/outcome-report"));
+const EtiologyReport = lazy(() => import("@/pages/etiology-report"));
+const AcuityReport = lazy(() => import("@/pages/acuity-report"));
+const RoundSummary = lazy(() => import("@/pages/round-summary"));
+const ExcelImportPage = lazy(() => import("@/pages/excel-import"));
+const DataImportPage = lazy(() => import("@/pages/data-import"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const PatientsPage = lazy(() => import("@/pages/patients"));
+
+// Loading fallback component
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <EcgLoader size="lg" text="Loading..." />
+    </div>
+  );
+}
 
 // Simple error boundary for debugging
 class ErrorBoundaryComponent extends React.Component<any, any> {
@@ -60,12 +74,27 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 
 function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean; user: any; onLogout: () => void }) {
   const { isFacilitySelected } = useAuth();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const facilitySelected = isFacilitySelected();
+  const [wasAuthenticated, setWasAuthenticated] = useState(false);
 
-  // Routes that can be accessed without facility selection
+  // Routes that can be accessed without facility selection (only when explicitly navigated)
   const allowedWithoutFacility = ['/facility/data-import'];
   const isAllowedRoute = allowedWithoutFacility.some(route => location === route);
+
+  // When user just logged in (transition from !auth to auth) without facility,
+  // redirect to root to ensure they go through facility selector
+  useEffect(() => {
+    if (isAuthenticated && !wasAuthenticated && !facilitySelected && isAllowedRoute) {
+      console.log('[Router] Fresh login detected on allowed route, redirecting to facility selector');
+      setLocation('/');
+    }
+    if (isAuthenticated) {
+      setWasAuthenticated(true);
+    } else {
+      setWasAuthenticated(false);
+    }
+  }, [isAuthenticated, facilitySelected, isAllowedRoute, wasAuthenticated, setLocation]);
 
   console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected, 'location:', location, 'isAllowedRoute:', isAllowedRoute);
   
@@ -90,7 +119,9 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
     console.log('[Router] Authenticated, no facility, but on allowed route - showing DataImportPage');
     return (
       <div className="min-h-screen bg-background py-6 px-[10%]">
-        <DataImportPage />
+        <Suspense fallback={<PageLoader />}>
+          <DataImportPage />
+        </Suspense>
       </div>
     );
   }
@@ -98,21 +129,25 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
   console.log('[Router] AUTHENTICATED - showing Dashboard in Layout');
   return (
     <Layout user={user} onLogout={onLogout}>
-      <Switch>
-        {console.log('[Router/Switch] Inside Switch, location should be /facility/')}
-        <Route path="/facility/" component={Dashboard} />
-        <Route path="/facility/patients" component={PatientsPage} />
-        <Route path="/facility/facility-report" component={FacilityWoundReport} />
-        <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
-        <Route path="/facility/etiology-report" component={EtiologyReport} />
-        <Route path="/facility/acuity-report" component={AcuityReport} />
-        <Route path="/facility/round-summary" component={RoundSummary} />
-        <Route path="/facility/excel-import" component={ExcelImportPage} />
-        <Route path="/facility/data-import" component={DataImportPage} />
-        <Route path="/facility/settings" component={SettingsPage} />
-        <Route path="/facility-selector" component={FacilitySelectorPage} />
-        <Route component={NotFound} />
-      </Switch>
+      <Suspense fallback={<PageLoader />}>
+        <RouteErrorBoundary>
+          <Switch>
+            {console.log('[Router/Switch] Inside Switch, location should be /facility/')}
+            <Route path="/facility/" component={Dashboard} />
+            <Route path="/facility/patients" component={PatientsPage} />
+            <Route path="/facility/facility-report" component={FacilityWoundReport} />
+            <Route path="/facility/outcome-report" component={OutcomeReportGlobal} />
+            <Route path="/facility/etiology-report" component={EtiologyReport} />
+            <Route path="/facility/acuity-report" component={AcuityReport} />
+            <Route path="/facility/round-summary" component={RoundSummary} />
+            <Route path="/facility/excel-import" component={ExcelImportPage} />
+            <Route path="/facility/data-import" component={DataImportPage} />
+            <Route path="/facility/settings" component={SettingsPage} />
+            <Route path="/facility-selector" component={FacilitySelectorPage} />
+            <Route component={NotFound} />
+          </Switch>
+        </RouteErrorBoundary>
+      </Suspense>
     </Layout>
   );
 }
@@ -269,8 +304,9 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
+      <ImportProvider>
+        <TooltipProvider>
+          <Toaster />
         <ErrorBoundary>
           {!isActiveTab && (
             <div style={{
@@ -340,8 +376,7 @@ function App() {
             </>
           )}
         </ErrorBoundary>
-      </TooltipProvider>
-    </QueryClientProvider>
+      </TooltipProvider>    </ImportProvider>    </QueryClientProvider>
   );
 }
 

@@ -20,7 +20,9 @@ import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { useDeterioratingWounds, useNewWounds, useResolvedWounds, useActiveWounds, useChronicWounds } from "@/hooks/use-patients";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { FacilityInfoBanner } from "@/components/facility-info-banner";
+import { NoFacilityData } from "@/components/no-facility-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
+import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { EcgLoader } from "@/components/ecg-loader";
 import { DeterioratingWoundsModal } from "@/components/deteriorating-wounds-modal";
 import { WoundActivityModal, WoundActivityType } from "@/components/wound-activity-modal";
@@ -34,6 +36,9 @@ export default function FacilityWoundReport() {
   const authInfo = getAuthInfo();
   const token = getToken();
   const email = getEmail();
+  
+  // Check if facility has wound encounter data
+  const { hasData: facilityHasData, facilityName } = useFacilityHasData();
   
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
@@ -59,27 +64,39 @@ export default function FacilityWoundReport() {
     return unsubscribe;
   }, []);
 
-  // Set default dates based on enabledDates (first and last enabled date for facility)
+  // Set default dates based on enabledDates (both start and end = most recent encounter)
   useEffect(() => {
     if (!enabledDatesLoading && enabledDates && enabledDates.length > 0 && !datesInitialized) {
-      // Get first (oldest) and last (most recent) enabled dates
-      const firstDateStr = enabledDates[0]; // Oldest date
+      // Get last (most recent) enabled date
       const lastDateStr = enabledDates[enabledDates.length - 1]; // Most recent date
       
-      // Parse dates
-      const [startYear, startMonth, startDay] = firstDateStr.split('-').map(Number);
+      // Parse date
       const [endYear, endMonth, endDay] = lastDateStr.split('-').map(Number);
-      
-      const firstDate = new Date(startYear, startMonth - 1, startDay);
       const lastDate = new Date(endYear, endMonth - 1, endDay);
       
-      console.log('[FacilityWoundReport] Setting date range from enabled dates:', firstDateStr, 'to', lastDateStr);
+      console.log('[FacilityWoundReport] Setting date range to most recent:', lastDateStr);
       
-      setStartDate(firstDate);
+      setStartDate(lastDate);
       setEndDate(lastDate);
       setDatesInitialized(true);
     }
   }, [enabledDates, enabledDatesLoading, datesInitialized, setStartDate, setEndDate]);
+
+  // Calculate first and last encounter dates for display
+  const { firstEncounterDate, lastEncounterDate } = useMemo(() => {
+    if (enabledDates && enabledDates.length > 0) {
+      const sorted = [...enabledDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      const parseDate = (dateStr: string) => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      };
+      return {
+        firstEncounterDate: parseDate(sorted[0]),
+        lastEncounterDate: parseDate(sorted[sorted.length - 1])
+      };
+    }
+    return { firstEncounterDate: undefined, lastEncounterDate: undefined };
+  }, [enabledDates]);
   
   console.log('[FacilityWoundReport] authInfo:', authInfo);
   console.log('[FacilityWoundReport] facilityId:', facilityId);
@@ -101,8 +118,6 @@ export default function FacilityWoundReport() {
       </div>
     );
   }
-
-  const facilityName = authInfo.entityName || authInfo.email?.split('@')[0] || "Facility";
   
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
@@ -415,6 +430,19 @@ export default function FacilityWoundReport() {
     };
   }, [pushScoreByDate]);
 
+  // Show NoFacilityData if the selected facility has no wound encounters
+  if (!facilityHasData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Wound Report</h1>
+          <p className="text-muted-foreground mt-1">Operational metrics by Date of Service (DOS)</p>
+        </div>
+        <NoFacilityData facilityName={facilityName} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -423,22 +451,30 @@ export default function FacilityWoundReport() {
             <h1 className="text-3xl font-bold tracking-tight text-foreground">Facility Wound Report</h1>
             <p className="text-muted-foreground mt-1">Operational metrics by Date of Service (DOS)</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {isComponentEnabled('facility-report', 'filter-panel') && (
-            <>
-            <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" enabledDates={enabledDates} />
-            <span className="text-muted-foreground">-</span>
-            <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" enabledDates={enabledDates} />
-            </>
-            )}
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            </Button>
-            {isComponentEnabled('facility-report', 'export-options') && (
-            <Button variant="default" className="ml-2">
-              <FileDown className="mr-2 h-4 w-4" />
-              Export
-            </Button>
+          <div className="flex flex-col items-start gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isComponentEnabled('facility-report', 'filter-panel') && (
+              <>
+              <DateRangePicker date={startDate} setDate={setStartDate} label="Start Date" enabledDates={enabledDates} />
+              <span className="text-muted-foreground">-</span>
+              <DateRangePicker date={endDate} setDate={setEndDate} label="End Date" enabledDates={enabledDates} />
+              </>
+              )}
+              <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
+                <RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+              {isComponentEnabled('facility-report', 'export-options') && (
+              <Button variant="default" className="ml-2">
+                <FileDown className="mr-2 h-4 w-4" />
+                Export
+              </Button>
+              )}
+            </div>
+            {/* Date Range Info */}
+            {enabledDates.length > 0 && firstEncounterDate && lastEncounterDate && (
+              <p className="text-xs text-muted-foreground mt-[5px]">
+                Data available from {format(firstEncounterDate, 'MMM dd, yyyy')} to {format(lastEncounterDate, 'MMM dd, yyyy')}
+              </p>
             )}
           </div>
         </div>

@@ -5,8 +5,10 @@ import {
   Save,
   X,
   Calendar as CalendarIcon,
+  ShieldAlert,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -152,6 +154,8 @@ export function WoundEditModal({
   const updateMutation = useUpdateWoundEncounter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
+  const canEdit = isAdmin();
 
   // Populate form when wound changes
   useEffect(() => {
@@ -579,18 +583,25 @@ export function WoundEditModal({
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={updateMutation.isPending}>
             <X className="h-4 w-4 mr-1" />
-            Cancel
+            {canEdit ? 'Cancel' : 'Close'}
           </Button>
-          <Button onClick={handleSave} disabled={updateMutation.isPending}>
-            {updateMutation.isPending ? (
-              <>Saving...</>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-1" />
-                Save Changes
-              </>
-            )}
-          </Button>
+          {canEdit ? (
+            <Button onClick={handleSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? (
+                <>Saving...</>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-1" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <ShieldAlert className="h-4 w-4" />
+              <span>Admin role required to edit</span>
+            </div>
+          )}
         </DialogFooter>
       </NestedDialogContent>
     </Dialog>

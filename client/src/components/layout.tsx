@@ -35,6 +35,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/use-auth";
 import { useSettings } from "@/hooks/use-settings";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
+import { useNavigationGuard } from "@/contexts/import-context";
+import { useToast } from "@/hooks/use-toast";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -47,6 +49,8 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
   const [location] = useLocation();
   console.log('[Layout] Current location:', location);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { toast } = useToast();
+  const { canNavigate, isImporting, importProgress } = useNavigationGuard();
   
   // Facility management
   const [, navigate] = useLocation();
@@ -56,7 +60,8 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
     setSelectedFacility,
     clearSelectedFacility,
     getSelectedFacilityInfo,
-    getAvailableFacilities
+    getAvailableFacilities,
+    isAdmin
   } = useAuth();
 
   const [selectedFacilityId, setSelectedFacilityIdLocal] = useState<string | null>(null);
@@ -78,14 +83,30 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
     loadFacilityInfo();
 
     // Listen for facility changes
-    const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, () => {
+    const unsubscribeFacilityChanged = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, () => {
       loadFacilityInfo();
     });
 
-    return unsubscribe;
+    // Listen for facilities list updates (create/delete)
+    const unsubscribeFacilitiesUpdated = onAuthEvent(AUTH_EVENTS.FACILITIES_UPDATED, () => {
+      loadFacilityInfo();
+    });
+
+    return () => {
+      unsubscribeFacilityChanged();
+      unsubscribeFacilitiesUpdated();
+    };
   }, []);
 
   const handleChangeFacility = (facilityId: string) => {
+    if (isImporting) {
+      toast({
+        title: 'Import in Progress',
+        description: `Cannot change facility while import is running (${importProgress.toFixed(0)}% complete).`,
+        variant: 'destructive',
+      });
+      return;
+    }
     console.log(`[Layout] Changing facility to: ${facilityId}`);
     setSelectedFacility(facilityId);
     setSelectedFacilityIdLocal(facilityId);
@@ -93,6 +114,14 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
   }
 
   const handleGoToFacilitySelector = () => {
+    if (isImporting) {
+      toast({
+        title: 'Import in Progress',
+        description: `Cannot navigate while import is running (${importProgress.toFixed(0)}% complete).`,
+        variant: 'destructive',
+      });
+      return;
+    }
     console.log('[Layout] Clearing facility and navigating to selector');
     clearSelectedFacility();
     setSelectedFacilityIdLocal(null);
@@ -217,16 +246,27 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
                 {item.separator && (
                   <div className="my-3 border-t border-sidebar-border" />
                 )}
-              <Link href={item.href}>
-                <div
-                  className={cn(
-                    "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer",
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
-                  )}
-                >
-                  <item.icon
+              <div
+                onClick={(e) => {
+                  if (isImporting && location !== item.href) {
+                    e.preventDefault();
+                    toast({
+                      title: 'Import in Progress',
+                      description: `Cannot navigate while import is running (${importProgress.toFixed(0)}% complete).`,
+                      variant: 'destructive',
+                    });
+                  } else if (location !== item.href) {
+                    navigate(item.href);
+                  }
+                }}
+                className={cn(
+                  "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer",
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+                )}
+              >
+                <item.icon
                     className={cn(
                       "h-5 w-5 flex-shrink-0 transition-colors",
                       isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
@@ -234,15 +274,26 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
                   />
                   {item.name}
                 </div>
-              </Link>
               </div>
             );
           })}
         </nav>
       </div>
       <div className="border-t border-sidebar-border p-4 space-y-2">
-        <Link href="/facility/settings">
+        {isAdmin() && (
           <div
+            onClick={(e) => {
+              if (isImporting && location !== '/facility/settings') {
+                e.preventDefault();
+                toast({
+                  title: 'Import in Progress',
+                  description: `Cannot navigate while import is running (${importProgress.toFixed(0)}% complete).`,
+                  variant: 'destructive',
+                });
+              } else if (location !== '/facility/settings') {
+                navigate('/facility/settings');
+              }
+            }}
             className={cn(
               "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer",
               location === "/facility/settings"
@@ -250,15 +301,15 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
                 : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
             )}
           >
-            <Settings
-              className={cn(
-                "h-5 w-5 flex-shrink-0 transition-colors",
-                location === "/facility/settings" ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-              )}
-            />
-            Settings
+              <Settings
+                className={cn(
+                  "h-5 w-5 flex-shrink-0 transition-colors",
+                  location === "/facility/settings" ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                )}
+              />
+              Settings
           </div>
-        </Link>
+        )}
         
         <div className="flex items-center gap-3 px-2 py-2 border-t border-sidebar-border/50 mt-2 pt-4">
           <Avatar className="h-9 w-9 border border-sidebar-border">

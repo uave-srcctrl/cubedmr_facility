@@ -1,10 +1,9 @@
 import {
   FileText,
-  User,
   Calendar,
   MapPin,
-  ChevronRight,
   Activity,
+  User,
 } from "lucide-react";
 import {
   Card,
@@ -20,6 +19,8 @@ import {
 } from "@/components/ui/dialog";
 import { EcgLoader } from "@/components/ecg-loader";
 import { cn, getEtiologyColor, normalizeEtiology } from "@/lib/utils";
+import { formatDateDisplay } from "@/lib/wound-utils";
+import { PatientHeaderCard } from "@/components/wound-display";
 import { ReportPatient } from "@/hooks/use-patients";
 
 interface ReportsGeneratedModalProps {
@@ -43,24 +44,6 @@ export function ReportsGeneratedModal({
   onPatientClick,
   dateRange,
 }: ReportsGeneratedModalProps) {
-
-  const formatDate = (dateString: string) => {
-    try {
-      const parts = dateString.split('-');
-      if (parts.length === 3) {
-        const [year, month, day] = parts.map(Number);
-        const date = new Date(year, month - 1, day);
-        return date.toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        });
-      }
-      return dateString;
-    } catch {
-      return dateString;
-    }
-  };
 
   const getProgressColor = (progress: string) => {
     const p = progress?.toLowerCase() || '';
@@ -88,7 +71,7 @@ export function ReportsGeneratedModal({
               </DialogTitle>
               <DialogDescription className="mt-1">
                 {dateRange ? (
-                  <>Wound encounters from {formatDate(dateRange.start)} to {formatDate(dateRange.end)}</>
+                  <>Wound encounters from {formatDateDisplay(dateRange.start)} to {formatDateDisplay(dateRange.end)}</>
                 ) : (
                   <>All wound encounter reports</>
                 )}
@@ -141,29 +124,14 @@ export function ReportsGeneratedModal({
                 >
                   <CardContent className="p-4">
                     {/* Patient Header */}
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-primary/10 rounded-full">
-                          <User className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-lg">
-                            {patient.patient_name || "Unknown Patient"}
-                          </h3>
-                          <p className="text-xs text-muted-foreground font-mono">
-                            ID: {patient.patient_id}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">
-                          {patient.encounters.length} report{patient.encounters.length !== 1 ? "s" : ""}
-                        </Badge>
-                        {onPatientClick && (
-                          <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </div>
+                    <PatientHeaderCard
+                      patientName={patient.patient_name}
+                      patientId={patient.patient_id}
+                      woundCount={patient.encounters.length}
+                      countLabel="report"
+                      badgeVariant="secondary"
+                      showChevron={!!onPatientClick}
+                    />
 
                     {/* Encounters List */}
                     <div className="space-y-2">
@@ -192,7 +160,7 @@ export function ReportsGeneratedModal({
                               <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                                 <div className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
-                                  {formatDate(encounter.dos)}
+                                  {formatDateDisplay(encounter.dos)}
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <Activity className="h-3 w-3" />
