@@ -25,7 +25,15 @@ app.use(helmet({
       styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://cubed-mr.app", "https://fonts.googleapis.com"],
+      connectSrc: [
+        "'self'",
+        "https://cubed-mr.app",
+        "http://localhost",
+        "http://api.local",
+        "https://fonts.googleapis.com",
+        "ws:",
+        "wss:",
+      ],
     },
   },
   hsts: {
@@ -56,7 +64,7 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*"); // Allow all origins for local dev
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Facility-Id, X-Requested-With");
-  
+
   // Handle preflight requests
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);

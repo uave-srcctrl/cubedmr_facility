@@ -12,7 +12,7 @@ import multer from 'multer';
 import { logAuthEvent, logSecurityEvent, logPhiAccess, AuditEventType, AuditResourceType } from './audit-logger';
 
 // Multer configuration for PDF uploads
-const uploadPdf = multer({ 
+const uploadPdf = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (_req: any, file: any, cb: any) => {
@@ -34,18 +34,17 @@ const LOG_FILE = process.env.LOG_FILE || "./server-login.log";
 const isProduction = process.env.NODE_ENV === 'production';
 
 // PHP Local Base URL (Apache/XAMPP)
-// Development: http://localhost (XAMPP Apache)
-// Production: Same server or configurable
-const PHP_LOCAL_BASE = process.env.PHP_LOCAL_BASE || "http://localhost";
+// Use cubed-mr.app for both dev and prod since localhost points to /var/www/html
+// which has outdated files. cubed-mr.app points to /var/www/prod with latest code.
+const PHP_LOCAL_BASE = process.env.PHP_LOCAL_BASE || "https://cubed-mr.app/api";
 
 // Remote Backend API URL (external server)
-// Development: http://api.local (Apache HTTP without SSL) - local virtual host
+// Development: https://cubed-mr.app (use same as production)
 // Production: https://cubed-mr.app
-const REMOTE_BACKEND_BASE = process.env.REMOTE_BACKEND_BASE || 
-  (isProduction ? "https://cubed-mr.app" : "http://api.local");
+const REMOTE_BACKEND_BASE = process.env.REMOTE_BACKEND_BASE || "https://cubed-mr.app";
 
 // Main backend API URL (for /get endpoint)
-const BACKEND_API_URL = process.env.BACKEND_API_URL || `${REMOTE_BACKEND_BASE}/get`;
+const BACKEND_API_URL = process.env.BACKEND_API_URL || `${REMOTE_BACKEND_BASE}/api/get`;
 
 console.log(`[Server Init] Environment: ${process.env.NODE_ENV || 'development'}`);
 console.log(`[Server Init] PHP Local Base: ${PHP_LOCAL_BASE}`);
@@ -67,9 +66,9 @@ const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes lockout
 function recordFailedLogin(email: string): boolean {
   const now = Date.now();
   const key = email.toLowerCase();
-  
+
   const attempt = failedLoginAttempts.get(key);
-  
+
   // If no previous attempts or window has expired, reset
   if (!attempt || now - attempt.firstAttemptTime > RATE_LIMIT_WINDOW) {
     failedLoginAttempts.set(key, {
@@ -78,15 +77,15 @@ function recordFailedLogin(email: string): boolean {
     });
     return true; // Allow
   }
-  
+
   // Increment count
   attempt.count++;
-  
+
   // Check if exceeded limit
   if (attempt.count > MAX_FAILED_ATTEMPTS) {
     return false; // Rate limited
   }
-  
+
   return true; // Allow
 }
 
@@ -99,18 +98,18 @@ function clearFailedLogins(email: string): void {
 function getRemainingAttempts(email: string): number {
   const key = email.toLowerCase();
   const attempt = failedLoginAttempts.get(key);
-  
+
   if (!attempt) {
     return MAX_FAILED_ATTEMPTS;
   }
-  
+
   const now = Date.now();
   // If window has expired, reset
   if (now - attempt.firstAttemptTime > RATE_LIMIT_WINDOW) {
     failedLoginAttempts.delete(key);
     return MAX_FAILED_ATTEMPTS;
   }
-  
+
   return Math.max(0, MAX_FAILED_ATTEMPTS - attempt.count);
 }
 
@@ -129,42 +128,42 @@ const genericLimiter = rateLimit({
   },
   skip: (req) => {
     // Skip rate limiting for GET requests, TryLogin, and facility queries (legitimate operations)
-    return req.method === "GET" || 
-           req.body?.entity === "TryLogin" || 
-           req.body?.action === "TryLogin" ||
-           req.body?.entity === "FacilityDataCenter" ||
-           req.body?.entity === "Facility" ||
-           req.body?.entity === "FacilitiesByProvider";
+    return req.method === "GET" ||
+      req.body?.entity === "TryLogin" ||
+      req.body?.action === "TryLogin" ||
+      req.body?.entity === "FacilityDataCenter" ||
+      req.body?.entity === "Facility" ||
+      req.body?.entity === "FacilitiesByProvider";
   },
 });
 
 const fetchWithTimeout = (url: string, options: any, timeout: number = 30000) => {
   // Configure HTTPS agent based on environment
   let agent: https.Agent | undefined = undefined;
-  
+
   if (url.startsWith('https')) {
     const isDevelopment = process.env.NODE_ENV === 'development';
-    
+
     agent = new https.Agent({
       rejectUnauthorized: !isDevelopment,  // False en desarrollo, True en producción
       minVersion: 'TLSv1.2',
       checkServerIdentity: isDevelopment ? () => undefined : undefined, // Skip hostname validation in dev
     });
-    
+
     if (isDevelopment) {
       console.log('[fetchWithTimeout] Development mode: self-signed certificates and hostname mismatch accepted');
     } else {
       console.log('[fetchWithTimeout] Production mode: certificate validation enabled');
     }
   }
-  
+
   const fetchOptions = {
     ...options,
     agent,
   };
-  
+
   console.log(`[fetchWithTimeout] URL: ${url}, environment: ${process.env.NODE_ENV || 'development'}`);
-  
+
   return Promise.race([
     fetch(url, fetchOptions),
     new Promise((_, reject) =>
@@ -176,18 +175,18 @@ const fetchWithTimeout = (url: string, options: any, timeout: number = 30000) =>
 // Helper function to extract token from request and include in backend call
 function getAuthHeaders(req: any): Record<string, string> {
   const headers: Record<string, string> = {};
-  
+
   // Extract Authorization header from the incoming request
   if (req.headers.authorization) {
     headers["Authorization"] = req.headers.authorization;
   }
-  
+
   // Also extract facility ID from headers or body
   const facilityId = req.headers["x-facility-id"] || req.body?.facilityId || req.query?.facility_id;
   if (facilityId) {
     headers["X-Facility-Id"] = facilityId.toString();
   }
-  
+
   return headers;
 }
 
@@ -246,11 +245,11 @@ async function validateTokenWithBackend(token: string, email: string): Promise<b
       },
       10000
     ) as Response;
-    
+
     if (!response.ok) {
       return false;
     }
-    
+
     const data = await response.json();
     return data.status === true || (data.data && data.data[0]?.valid === true);
   } catch (error) {
@@ -263,22 +262,22 @@ async function validateTokenWithBackend(token: string, email: string): Promise<b
 function requireAuth(req: any, res: any, next: () => void) {
   const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
   const email = req.body?.email || req.headers["x-user-email"];
-  
+
   if (!token) {
     return res.status(401).json({ status: false, error: "Authentication required - no token" });
   }
-  
+
   // Check token cache
   const cachedEntry = tokenCache.get(token);
   const now = Date.now();
-  
+
   if (cachedEntry && now < cachedEntry.expiresAt) {
     // Token is cached and valid - refresh session timeout
     cachedEntry.expiresAt = now + SESSION_TIMEOUT;
     req.user = { email: cachedEntry.email, facilityId: cachedEntry.facilityId };
     return next();
   }
-  
+
   // Token not in cache or expired - for now just check if it exists
   // Full backend validation can be done asynchronously
   if (token && token.length > 10) {
@@ -291,7 +290,7 @@ function requireAuth(req: any, res: any, next: () => void) {
     req.user = { email: email || "unknown" };
     return next();
   }
-  
+
   return res.status(401).json({ status: false, error: "Invalid authentication token" });
 }
 
@@ -299,11 +298,11 @@ function requireAuth(req: any, res: any, next: () => void) {
 function optionalAuth(req: any, res: any, next: () => void) {
   const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
   const email = req.body?.email || req.headers["x-user-email"];
-  
+
   if (token) {
     const cachedEntry = tokenCache.get(token);
     const now = Date.now();
-    
+
     if (cachedEntry && now < cachedEntry.expiresAt) {
       cachedEntry.expiresAt = now + SESSION_TIMEOUT;
       req.user = { email: cachedEntry.email, facilityId: cachedEntry.facilityId };
@@ -316,7 +315,7 @@ function optionalAuth(req: any, res: any, next: () => void) {
       req.user = { email: email || "unknown" };
     }
   }
-  
+
   next();
 }
 
@@ -332,12 +331,13 @@ export async function registerRoutes(
   // ============= SECURITY HEADERS (HIPAA Compliance) =============
   app.use((req, res, next) => {
     // Content Security Policy - restrict resource loading
-    res.setHeader('Content-Security-Policy', 
+    res.setHeader('Content-Security-Policy',
       "default-src 'self'; " +
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-      "style-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
       "img-src 'self' data: blob:; " +
-      "font-src 'self' data:; " +
+      "font-src 'self' data: https://fonts.gstatic.com; " +
       `connect-src 'self' ${REMOTE_BACKEND_BASE} ${PHP_LOCAL_BASE}; ` +
       "frame-ancestors 'none'; " +
       "form-action 'self'"
@@ -365,11 +365,11 @@ export async function registerRoutes(
 
   app.get("/api/diagnose/backend-connectivity", async (req, res) => {
     console.log("[/api/diagnose/backend-connectivity] Testing connectivity to backend");
-    
+
     try {
       const testUrl = BACKEND_API_URL;
       console.log("[/api/diagnose/backend-connectivity] Testing URL:", testUrl);
-      
+
       // Try to fetch with detailed error logging
       const response = await fetchWithTimeout(
         testUrl,
@@ -380,12 +380,12 @@ export async function registerRoutes(
         },
         3000
       );
-      
+
       console.log("[/api/diagnose/backend-connectivity] Response status:", response.status);
-      
+
       const text = await response.text();
       console.log("[/api/diagnose/backend-connectivity] Response text:", text.substring(0, 200));
-      
+
       res.json({
         status: true,
         message: "Backend connectivity test successful",
@@ -397,7 +397,7 @@ export async function registerRoutes(
       const err = error instanceof Error ? error : new Error(String(error));
       console.error("[/api/diagnose/backend-connectivity] Error:", err.message);
       console.error("[/api/diagnose/backend-connectivity] Stack:", err.stack);
-      
+
       res.status(500).json({
         status: false,
         error: err.message,
@@ -408,20 +408,20 @@ export async function registerRoutes(
   });
 
   // ============= AUTHENTICATION ROUTES =============
-  
+
   app.post("/api/get", genericLimiter, async (req, res) => {
     // Debug: Log incoming request body for OTC debugging
     console.log(`[/api/get] Incoming body:`, JSON.stringify(req.body).substring(0, 500));
-    
+
     const { entity, action, email, password, deviceId, name, ...rest } = req.body;
-    
+
     try {
       // Support both 'entity' and 'action' parameters for backward compatibility
       const requestedEntity = entity || action;
-      
+
       // Define local-only methods early to use in validation
       const localOnlyMethods = [
-        "getWoundsByHealingStatus", 
+        "getWoundsByHealingStatus",
         "getWoundsByDisposition",
         "lstAllFacilities",
         "addNewFacility",
@@ -433,26 +433,26 @@ export async function registerRoutes(
         "updateUserStatus",
         "createUser"
       ];
-      
+
       // Check if this is a local-only method (routes to PHP, not remote)
       const isLocalOnlyMethod = requestedEntity === "FacilityDataCenter" && localOnlyMethods.includes(rest.method);
-      
+
       // Direct local entities (not under FacilityDataCenter)
       const localEntities = ["getOneTimeCode", "validateOneTimeCode"];
       const isLocalEntity = localEntities.includes(requestedEntity);
-      
+
       // Debug logging for OTC
       console.log(`[/api/get] Entity check: requestedEntity="${requestedEntity}", isLocalEntity=${isLocalEntity}, localEntities=${JSON.stringify(localEntities)}`);
-      
+
       // ============= CUSTOM RATE LIMIT FOR TryLogin =============
       if (requestedEntity === "TryLogin") {
         if (!email) {
-          return res.status(400).json({ 
-            status: false, 
-            error: "Missing email for login" 
+          return res.status(400).json({
+            status: false,
+            error: "Missing email for login"
           });
         }
-        
+
         // Check if this email has exceeded login attempts
         const remaining = getRemainingAttempts(email);
         if (remaining <= 0) {
@@ -469,29 +469,29 @@ export async function registerRoutes(
           });
         }
       }
-      
+
       // Validate required parameters based on entity type
       // Local-only methods don't require email upfront - PHP will validate token
       if (!requestedEntity) {
         console.error("[/api/get] Missing entity parameter");
-        return res.status(400).json({ 
-          status: false, 
-          error: "Missing required parameter: entity" 
+        return res.status(400).json({
+          status: false,
+          error: "Missing required parameter: entity"
         });
       }
-      
+
       // For non-local methods, require email
       if (!isLocalOnlyMethod && !isLocalEntity && !email) {
-        console.error("[/api/get] Missing email for non-local method:", { 
-          entity: requestedEntity, 
+        console.error("[/api/get] Missing email for non-local method:", {
+          entity: requestedEntity,
           method: rest.method
         });
-        return res.status(400).json({ 
-          status: false, 
-          error: "Missing required parameter: email" 
+        return res.status(400).json({
+          status: false,
+          error: "Missing required parameter: email"
         });
       }
-      
+
       // ============= INTERCEPT LOCAL-ONLY METHODS AND ENTITIES EARLY =============
       if (isLocalOnlyMethod || isLocalEntity) {
         try {
@@ -503,48 +503,48 @@ export async function registerRoutes(
             ...(rest.token && { token: rest.token }),
             ...rest,
           };
-          
+
           const localApiUrl = `${PHP_LOCAL_BASE}/get`;
           console.log(`[/api/get] Routing local entity/method to: ${localApiUrl}`, { entity: requestedEntity, method: rest.method });
-          
+
           const localResponse = await fetchWithTimeout(localApiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(localPayload),
           });
-          
+
           if (localResponse.ok) {
             const localData = await localResponse.json();
             return res.json(localData);
           } else {
             console.error(`[/api/get] Local method failed with status:`, localResponse.status);
-            return res.status(localResponse.status).json({ 
-              status: false, 
-              error: `Local API returned status ${localResponse.status}` 
+            return res.status(localResponse.status).json({
+              status: false,
+              error: `Local API returned status ${localResponse.status}`
             });
           }
         } catch (localError) {
           console.error(`[/api/get] Error calling local API:`, localError);
-          return res.status(500).json({ 
-            status: false, 
-            error: `Failed to process method locally` 
+          return res.status(500).json({
+            status: false,
+            error: `Failed to process method locally`
           });
         }
       }
-      
+
       // For login (TryLogin), require password and deviceId
       if (requestedEntity === "TryLogin") {
         if (!password || !deviceId) {
-          console.error("[/api/get] Missing login parameters:", { 
+          console.error("[/api/get] Missing login parameters:", {
             password: password ? "***" : undefined,
-            deviceId 
+            deviceId
           });
-          return res.status(400).json({ 
-            status: false, 
-            error: "Missing required login parameters: password and deviceId" 
+          return res.status(400).json({
+            status: false,
+            error: "Missing required login parameters: password and deviceId"
           });
         }
-        
+
         // ============= TRY OTC VALIDATION FIRST =============
         // SECURITY: When an OTC is active (pending and not expired), ONLY that exact code works
         // This prevents old OTC codes from working through the remote server
@@ -557,26 +557,26 @@ export async function registerRoutes(
             password: password,
             deviceId: deviceId,
           };
-          
+
           const otcResponse = await fetchWithTimeout(`${PHP_LOCAL_BASE}/get`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(otcPayload),
           }, 5000) as Response;
-          
+
           if (otcResponse.ok) {
             const otcData = await otcResponse.json();
-            
+
             // If OTC validation succeeded - authenticated via OTC
             if (otcData.status === true && otcData.data?.[0]?.status === 1) {
               console.log("[/api/get] OTC validation SUCCESS - user authenticated via OTC");
               clearFailedLogins(email);
               return res.json(otcData);
             }
-            
+
             // Check the error type to decide what to do
             const errorMsg = otcData.error || otcData.data?.[0]?.msg || 'Unknown';
-            
+
             // SECURITY: If there's an active OTC but codes don't match, reject immediately
             // This prevents: 1) old OTC codes working, 2) bypassing OTC via password
             // The user MUST use the current OTC or request a new one
@@ -588,7 +588,7 @@ export async function registerRoutes(
                 data: [{ status: 0, msg: 'Invalid OTC', reason: 1 }]
               });
             }
-            
+
             // If OTC expired, reject - user must request new one
             if (errorMsg === 'OTC expired') {
               console.log("[/api/get] OTC expired - blocking login");
@@ -598,7 +598,7 @@ export async function registerRoutes(
                 data: [{ status: 0, msg: 'OTC expired', reason: 1 }]
               });
             }
-            
+
             // For "No OTC pending" or "User not found" - continue with password login
             console.log(`[/api/get] No OTC pending (${errorMsg}), continuing with remote TryLogin...`);
           }
@@ -606,7 +606,7 @@ export async function registerRoutes(
           console.log("[/api/get] OTC check error (continuing with remote):", otcError instanceof Error ? otcError.message : otcError);
         }
       }
-      
+
       // Build the base remote payload first
       const remotePayload = {
         entity: requestedEntity,
@@ -620,14 +620,14 @@ export async function registerRoutes(
 
       // For other entities, require token (either from Authorization header or request body)
       // Exception: FacilityDataCenter with method=tryLogin doesn't require token
-      const isLoginAttempt = requestedEntity === "TryLogin" || 
+      const isLoginAttempt = requestedEntity === "TryLogin" ||
         requestedEntity === "getOneTimeCode" ||
         requestedEntity === "validateOneTimeCode" ||
         (requestedEntity === "FacilityDataCenter" && rest.method === "tryLogin");
-      
+
       if (!isLoginAttempt) {
         let token: string | undefined;
-        
+
         // Check for token in Authorization header first
         const authHeader = req.headers.authorization;
         if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -636,12 +636,12 @@ export async function registerRoutes(
           // Fall back to token in request body
           token = remotePayload.token as string;
         }
-        
+
         if (!token) {
           console.error("[/api/get] Missing token for entity:", requestedEntity);
-          return res.status(401).json({ 
-            status: false, 
-            error: "Authorization required for this operation" 
+          return res.status(401).json({
+            status: false,
+            error: "Authorization required for this operation"
           });
         }
       }
@@ -656,7 +656,7 @@ export async function registerRoutes(
           remotePayload.deviceId = deviceId;
           // PHI logging removed
         }
-        
+
         // Flutter adds encountertrackid (SHA256 hash of email + salt + deviceId)
         if (remotePayload.email && (remotePayload.deviceId || deviceId)) {
           const salt = remotePayload.email + "38457487" + (remotePayload.deviceId || deviceId);
@@ -664,7 +664,7 @@ export async function registerRoutes(
           remotePayload.encountertrackid = encountertrackid;
           // PHI logging removed
         }
-        
+
         // Flutter adds providertrackid which is the authentication token
         if (remotePayload.token && !remotePayload.providertrackid) {
           remotePayload.providertrackid = remotePayload.token;
@@ -674,7 +674,7 @@ export async function registerRoutes(
 
       let body;
       let headers = {};
-      
+
       if (requestedEntity === "TryLogin" || requestedEntity === "EntityInfo" || requestedEntity === "GroupsByUser" || requestedEntity === "FacilityDataCenter") {
         // For login, user data, and facility list operations, use JSON
         body = JSON.stringify(remotePayload);
@@ -695,7 +695,7 @@ export async function registerRoutes(
       }
 
       console.log("[/api/get] About to fetch from backend:", BACKEND_API_URL);
-      
+
       const remoteResponse = await fetchWithTimeout(
         BACKEND_API_URL,
         {
@@ -716,22 +716,22 @@ export async function registerRoutes(
         const responseText = await remoteResponse.text();
         // Log response size and first 100 chars for debugging (no PHI)
         logLogin(`[/api/get] Backend raw response (${responseText.length} bytes)`);
-        
+
         // Check if response looks like JSON
         const trimmed = responseText.trim();
         if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
           console.error("[/api/get] Backend returned non-JSON response:", trimmed.substring(0, 200));
           logLogin(`[/api/get] Non-JSON response starts with: ${trimmed.substring(0, 50)}`);
-          return res.status(500).json({ 
-            status: false, 
+          return res.status(500).json({
+            status: false,
             error: "Backend returned invalid response",
-            details: `Response is not JSON (starts with: ${trimmed.substring(0, 20)}...)` 
+            details: `Response is not JSON (starts with: ${trimmed.substring(0, 20)}...)`
           });
         }
-        
+
         data = JSON.parse(responseText);
         // PHI logging removed for HIPAA compliance
-        
+
         // Log error status without PHI
         if (data.status === false) {
           console.error("[/api/get] API Remote returned error, status:", data.status);
@@ -742,23 +742,23 @@ export async function registerRoutes(
         logLogin(`[/api/get] Failed to parse backend response: ${errorMsg}`);
         return res.status(500).json({ status: false, error: "Backend returned invalid response", details: errorMsg });
       }
-      
+
       // PHI logging removed for HIPAA compliance
       logLogin(`[/api/get] Backend response received`);
-      
+
       // ============= HANDLE TryLogin RESPONSE =============
       if (requestedEntity === "TryLogin") {
         const dataItem = data.data && data.data[0];
         const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
         const userAgent = req.headers['user-agent'] || 'unknown';
-        
+
         // Check if login was successful (status === 1)
         if (dataItem?.status === 1) {
           // Clear failed login attempts on successful login
           clearFailedLogins(email);
           // PHI logging removed for HIPAA compliance
           logLogin(`[/api/get] Login successful - Cleared failed attempts`);
-          
+
           // HIPAA Audit: Log successful authentication
           logAuthEvent(AuditEventType.LOGIN_SUCCESS, email, {
             ipAddress: clientIp,
@@ -772,7 +772,7 @@ export async function registerRoutes(
           const remaining = getRemainingAttempts(email);
           // PHI logging removed for HIPAA compliance
           logLogin(`[/api/get] Login failed - Remaining attempts: ${remaining}`);
-          
+
           // HIPAA Audit: Log failed authentication
           logAuthEvent(AuditEventType.LOGIN_FAILURE, email, {
             ipAddress: clientIp,
@@ -780,7 +780,7 @@ export async function registerRoutes(
             result: 'FAILURE',
             details: `Failed login attempt. Remaining: ${remaining}`
           });
-          
+
           // If rate limited, add that information to response
           if (!allowed) {
             // HIPAA Audit: Log rate limit exceeded
@@ -790,7 +790,7 @@ export async function registerRoutes(
               userAgent: userAgent,
               details: 'Login rate limit exceeded - account temporarily locked'
             });
-            
+
             data.data = data.data || [];
             data.data[0] = {
               ...dataItem,
@@ -800,7 +800,7 @@ export async function registerRoutes(
           }
         }
       }
-      
+
       res.json(data);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -823,7 +823,7 @@ export async function registerRoutes(
     if (token) {
       invalidateToken(token);
     }
-    
+
     // HIPAA Audit: Log logout event
     logAuthEvent(AuditEventType.LOGOUT, email || 'unknown', {
       ipAddress: clientIp,
@@ -843,7 +843,7 @@ export async function registerRoutes(
         BACKEND_API_URL,
         {
           method: "POST",
-          headers: { 
+          headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(logoutPayload),
@@ -851,7 +851,7 @@ export async function registerRoutes(
       );
 
       const data = await remoteResponse.json();
-      
+
       // If first attempt fails, try with auth headers
       if (data.error === "Unauthorized access" && req.headers.authorization) {
         const authHeaders = getAuthHeaders(req);
@@ -859,7 +859,7 @@ export async function registerRoutes(
           BACKEND_API_URL,
           {
             method: "POST",
-            headers: { 
+            headers: {
               "Content-Type": "application/json",
               ...authHeaders,
             },
@@ -889,7 +889,7 @@ export async function registerRoutes(
     if (token) {
       invalidateToken(token);
     }
-    
+
     // HIPAA Audit: Log logout event
     logAuthEvent(AuditEventType.LOGOUT, email || 'unknown', {
       ipAddress: clientIp,
@@ -909,7 +909,7 @@ export async function registerRoutes(
         BACKEND_API_URL,
         {
           method: "POST",
-          headers: { 
+          headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(logoutPayload),
@@ -953,13 +953,13 @@ export async function registerRoutes(
     try {
       // Call Slim app endpoint through Apache (with /api prefix to match Slim route)
       const phpUrl = `${PHP_LOCAL_BASE}/api/facility-acuity-index`;
-      
+
       // Build request body with support for date range mode
       const requestBody: any = {
         facility_id: facilityId,
         facilityId: facilityId,
       };
-      
+
       // If startDate and endDate are provided, use date range mode
       if (startDate && endDate) {
         requestBody.startDate = startDate;
@@ -970,9 +970,9 @@ export async function registerRoutes(
         requestBody.dos = dos;
         console.log(`[/api/facility-acuity-index] Using 4-weeks mode with dos: ${dos}`);
       }
-      
+
       console.log(`[/api/facility-acuity-index] Calling backend via Apache: ${phpUrl}`, requestBody);
-      
+
       const response = await fetch(phpUrl, {
         method: 'POST',
         headers: {
@@ -983,7 +983,7 @@ export async function registerRoutes(
       });
 
       console.log(`[/api/facility-acuity-index] Response status: ${response.status}`);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`[/api/facility-acuity-index] Backend error status ${response.status}: ${errorText}`);
@@ -992,12 +992,12 @@ export async function registerRoutes(
 
       const data = await response.json();
       console.log(`[/api/facility-acuity-index] ✅ Backend response for facility ${facilityId} and dos ${dos}:`, data);
-      
+
       // Return data as-is if it has the expected structure, otherwise wrap it
       if (data && typeof data === 'object') {
         return res.json(data);
       }
-      
+
       res.json({
         status: true,
         data: data,
@@ -1005,8 +1005,8 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("[/api/facility-acuity-index] ❌ Error:", error);
-      res.status(500).json({ 
-        error: "Failed to fetch acuity index", 
+      res.status(500).json({
+        error: "Failed to fetch acuity index",
         details: error instanceof Error ? error.message : String(error)
       });
     }
@@ -1021,11 +1021,11 @@ export async function registerRoutes(
     const facilityId = req.headers["x-facility-id"] || req.body?.facility_id || req.query?.facility_id || req.body?.facilityId;
     const token = req.headers.authorization?.replace("Bearer ", "");
     const requestEmail = req.body?.email || req.query?.email;
-    
+
     // Get date range from body or query params
     let dosStart = req.body?.dosStart || req.query?.dosStart;
     let dosEnd = req.body?.dosEnd || req.query?.dosEnd;
-    
+
     // If only single date provided, calculate 30-day range ending on that date
     const singleDate = req.body?.date || req.query?.date;
     if (singleDate && !dosStart && !dosEnd) {
@@ -1035,7 +1035,7 @@ export async function registerRoutes(
       dosStart = startDate.toISOString().split('T')[0];
       dosEnd = endDate.toISOString().split('T')[0];
     }
-    
+
     // Default to last 30 days if no dates provided
     if (!dosStart || !dosEnd) {
       const today = new Date();
@@ -1076,11 +1076,41 @@ export async function registerRoutes(
 
       const backendData = await etiologyResponse.json();
       console.log(`[/api/etiology-distribution] Backend response:`, backendData);
-      
+
+      let rawData = backendData.data || backendData;
+
+      // Transform metric_name/metric_value format from facility.etiology_distribution SP
+      // into { woundEtiology, count, percentage } expected by the frontend
+      if (Array.isArray(rawData) && rawData.length > 0 && rawData[0].metric_name !== undefined) {
+        const countMap = new Map<string, number>();
+        const pctMap = new Map<string, number>();
+
+        for (const row of rawData) {
+          const metricName = String(row.metric_name || '');
+          const metricValue = parseFloat(row.metric_value) || 0;
+
+          if (metricName.startsWith('Number of ')) {
+            const etiology = metricName.replace(/^Number of\s+/i, '').trim();
+            countMap.set(etiology, Math.round(metricValue));
+          } else if (metricName.startsWith('Percentage of ')) {
+            const etiology = metricName.replace(/^Percentage of\s+/i, '').trim();
+            pctMap.set(etiology, parseFloat(metricValue.toFixed(2)));
+          }
+        }
+
+        rawData = Array.from(countMap.entries()).map(([etiology, count]) => ({
+          woundEtiology: etiology,
+          count,
+          percentage: pctMap.get(etiology) ?? 0,
+        }));
+
+        console.log(`[/api/etiology-distribution] Transformed ${rawData.length} etiology items`);
+      }
+
       // Wrap the response to ensure consistent structure
       res.json({
         status: true,
-        data: backendData.data || backendData,
+        data: rawData,
         source: "backend"
       });
     } catch (error) {
@@ -1099,12 +1129,12 @@ export async function registerRoutes(
     const requestEmail = req.body?.email || req.query?.email;
     const dosStart = req.body?.dosStart || req.query?.dosStart;
     const dosEnd = req.body?.dosEnd || req.query?.dosEnd;
-    
+
     console.log('[/api/facility-wound-report] Request received');
     console.log('[/api/facility-wound-report] facilityId:', facilityId);
     // PHI logging removed for HIPAA compliance
     console.log('[/api/facility-wound-report] Date range from client:', dosStart, 'to', dosEnd);
-    
+
     if (!facilityId) {
       return res.status(400).json({ error: "Missing facility ID" });
     }
@@ -1112,12 +1142,12 @@ export async function registerRoutes(
     try {
       const today = new Date();
       const token = req.headers.authorization?.replace("Bearer ", "") || req.body?.token;
-      
+
       console.log(`[/api/facility-wound-report] Using facility ${facilityId}, token present: ${!!token}`);
 
       // Use provided date range or fallback strategy: 30d → 90d → 180d → 365d
       const dateRanges = [];
-      
+
       if (dosStart && dosEnd) {
         // Use the provided date range
         dateRanges.push({ dosStart, dosEnd, days: 0, label: "Client provided" });
@@ -1137,7 +1167,7 @@ export async function registerRoutes(
         let startDate: string;
         let endDate: string;
         let rangeLabel: string;
-        
+
         if (range.dosStart && range.dosEnd) {
           startDate = range.dosStart;
           endDate = range.dosEnd;
@@ -1163,7 +1193,7 @@ export async function registerRoutes(
             token: token,
             deviceId: "facility-wound-report"
           };
-          
+
           console.log(`[/api/facility-wound-report] POST to: ${BACKEND_API_URL}`);
           console.log(`[/api/facility-wound-report] Request body:`, requestBody);
 
@@ -1179,7 +1209,7 @@ export async function registerRoutes(
           if (woundOutcomeResponse.ok) {
             const woundOutcomeData = await woundOutcomeResponse.json();
             console.log(`[/api/facility-wound-report] Response status: ${woundOutcomeData.status}, data present: ${!!woundOutcomeData.data}`);
-            
+
             if (woundOutcomeData.status && woundOutcomeData.data) {
               console.log(`[/api/facility-wound-report] First record facility_name: ${woundOutcomeData.data[0]?.facility_name || 'N/A'}`);
               backendData = woundOutcomeData;
@@ -1196,9 +1226,9 @@ export async function registerRoutes(
       // Return data - no fallback, only rptFacilityWoundOutcome
       if (backendData && backendData.data) {
         const dataArray = Array.isArray(backendData.data) ? backendData.data : [backendData.data];
-        
+
         console.log(`[/api/facility-wound-report] Returning ${dataArray.length} records for period: ${usedPeriod}`);
-        
+
         return res.json({
           status: true,
           data: dataArray,
@@ -1224,16 +1254,16 @@ export async function registerRoutes(
   app.post("/api/facility-wound-report", facilityWoundReportHandler);
 
   // ============= DASHBOARD KPI ROUTES =============
-  
+
   // Transform backend data into KPI format
   function transformToKPIsFormat(backendData: any) {
     // Handle different response formats from the backend
     let data = backendData.data || backendData;
-    
+
     // If data is an array (could be weekly data OR wound-outcome data)
     if (Array.isArray(data) && data.length > 0) {
       const firstItem = data[0];
-      
+
       // Check if this is facility-wound-outcome format (has "Number of Active Wounds")
       if (firstItem["Number of Active Wounds"] !== undefined) {
         // This is wound-outcome data - extract directly with correct field mappings per spec
@@ -1245,7 +1275,7 @@ export async function registerRoutes(
         const newWounds = parseInt(firstItem["Number of New Wounds"]) || 0;
         const criticalCases = parseInt(firstItem["Facility Acuity Index"]) || 0;
         const reportsGenerated = resolvedWounds + newWounds;
-        
+
         return {
           status: true,
           data: {
@@ -1280,7 +1310,7 @@ export async function registerRoutes(
         // This is facility-acuity-index format (weekly data) - used as fallback
         // Filter out weeks with zero wounds/patients to avoid skewing averages
         const weeksWithData = data.filter((week: any) => (week.wounds > 0 || week.patients > 0));
-        
+
         const aggregated = {
           totalWounds: 0,
           totalPatients: 0,
@@ -1288,7 +1318,7 @@ export async function registerRoutes(
           maxWounds: 0,
           maxPatients: 0
         };
-        
+
         // Aggregate from weeks that have actual data
         for (const week of weeksWithData.length > 0 ? weeksWithData : data) {
           aggregated.totalWounds += week.wounds || 0;
@@ -1296,17 +1326,17 @@ export async function registerRoutes(
           aggregated.maxWounds = Math.max(aggregated.maxWounds, week.wounds || 0);
           aggregated.maxPatients = Math.max(aggregated.maxPatients, week.patients || 0);
         }
-        
+
         // Use max values if available, otherwise use averages
         const activeWounds = aggregated.maxWounds > 0 ? aggregated.maxWounds : (aggregated.totalWeeks > 0 ? Math.ceil(aggregated.totalWounds / aggregated.totalWeeks) : 0);
         const activePatients = aggregated.maxPatients > 0 ? aggregated.maxPatients : (aggregated.totalWeeks > 0 ? Math.ceil(aggregated.totalPatients / aggregated.totalWeeks) : 0);
         const lastWeekData = weeksWithData.length > 0 ? weeksWithData[weeksWithData.length - 1] : data[data.length - 1];
         const acuityIndex = parseFloat(lastWeekData?.["Facility Acuity Index"] || 0) || 0;
-        
+
         // For acuity-index fallback, estimate healing rate and reports from available data
         const estimatedHealingRate = Math.round(Math.min(activePatients * 0.8, 100));
         const estimatedReports = Math.round(activeWounds * 2);
-        
+
         return {
           status: true,
           data: {
@@ -1339,7 +1369,7 @@ export async function registerRoutes(
         };
       }
     }
-    
+
     // Fallback if data format is not recognized
     return {
       status: true,
@@ -1353,7 +1383,7 @@ export async function registerRoutes(
       source: "backend"
     };
   }
-  
+
   // Support both GET (with header) and POST (with body)
   const dashboardKpisHandler = async (req: any, res: any) => {
     console.log(`\n=== /api/dashboard/kpis called (using LOCAL API) ===`);
@@ -1362,17 +1392,17 @@ export async function registerRoutes(
     console.log(`[/api/dashboard/kpis] Request body:`, JSON.stringify(req.body, null, 2));
     console.log(`[/api/dashboard/kpis] Request query:`, JSON.stringify(req.query, null, 2));
     console.log(`[/api/dashboard/kpis] Authorization header present:`, !!req.headers.authorization);
-    
+
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     const email = req.body?.email || req.headers["x-user-email"];
-    
+
     // Get date range from query params
     const startDateParam = req.query?.startDate;
     const endDateParam = req.query?.endDate;
-    
+
     console.log(`[/api/dashboard/kpis] Extracted facilityId: ${facilityId}`);
     console.log(`[/api/dashboard/kpis] Date params - startDate: ${startDateParam}, endDate: ${endDateParam}`);
-    
+
     if (!facilityId) {
       console.error(`[/api/dashboard/kpis] Missing facility ID`);
       return res.status(400).json({ status: false, error: "Missing facility ID" });
@@ -1380,10 +1410,10 @@ export async function registerRoutes(
 
     try {
       const token = req.headers.authorization?.replace('Bearer ', '') || req.body?.token;
-      
+
       console.log(`[/api/dashboard/kpis] Using local API for facilityId: ${facilityId}`);
       console.log(`[/api/dashboard/kpis] Token present: ${!!token}`);
-      
+
       // If email is not provided, try to extract from request body or use a placeholder
       // The email will be validated on the backend
       let requestEmail = email;
@@ -1391,25 +1421,25 @@ export async function registerRoutes(
         // Try to extract from any available user info in the body
         requestEmail = req.body.email || req.body.userEmail || "dashboard-user";
       }
-      
+
       // PHI logging removed for HIPAA compliance
       console.log(`[/api/dashboard/kpis] BACKEND_API_URL: ${BACKEND_API_URL}`);
-      
+
       let backendData = null;
       let usedPeriod = null;
       let usedEndpoint = null;
-      
+
       // If date params are provided, use them directly
       if (startDateParam && endDateParam) {
         console.log(`[/api/dashboard/kpis] Using provided date range: ${startDateParam} to ${endDateParam}`);
         usedPeriod = `${startDateParam} to ${endDateParam}`;
-        
+
         try {
           const woundOutcomeResponse = await fetchWithTimeout(
             BACKEND_API_URL,
             {
               method: "POST",
-              headers: { 
+              headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
@@ -1428,7 +1458,7 @@ export async function registerRoutes(
           if (woundOutcomeResponse.ok) {
             const woundOutcomeData = await woundOutcomeResponse.json();
             console.log(`[/api/dashboard/kpis] Received response:`, JSON.stringify(woundOutcomeData).substring(0, 500));
-            
+
             if (woundOutcomeData.status && woundOutcomeData.data && woundOutcomeData.data.length > 0) {
               backendData = woundOutcomeData;
               usedEndpoint = "rptFacilityWoundOutcome (LOCAL)";
@@ -1439,7 +1469,7 @@ export async function registerRoutes(
           console.log(`[/api/dashboard/kpis] Error with provided dates:`, (err as Error).message);
         }
       }
-      
+
       // Fallback: Define date range fallback strategy: 30d → 90d → 180d → 365d
       if (!backendData) {
         const today = new Date();
@@ -1449,23 +1479,23 @@ export async function registerRoutes(
           { days: 180, label: "Last 180 days" },
           { days: 365, label: "Last 365 days" }
         ];
-        
+
         // Try wound-outcome endpoint (local API) with fallback date ranges
         for (const range of dateRanges) {
           const startDate = new Date(today);
           startDate.setDate(startDate.getDate() - range.days);
           const startDateStr = startDate.toISOString().split('T')[0];
           const endDateStr = today.toISOString().split('T')[0];
-          
+
           console.log(`[/api/dashboard/kpis] Trying LOCAL rptFacilityWoundOutcome for ${range.label} (${startDateStr} to ${endDateStr})`);
-          
+
           try {
             // Call local API endpoint for facility-wound-outcome (use BACKEND_API_URL directly)
             const woundOutcomeResponse = await fetchWithTimeout(
               BACKEND_API_URL,
               {
                 method: "POST",
-                headers: { 
+                headers: {
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
@@ -1517,7 +1547,7 @@ export async function registerRoutes(
             BACKEND_API_URL,
             {
               method: "POST",
-              headers: { 
+              headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
@@ -1532,7 +1562,7 @@ export async function registerRoutes(
           );
 
           console.log(`[/api/dashboard/kpis] Fallback response OK: ${acuityResponse.ok}, status: ${acuityResponse.status}`);
-          
+
           if (acuityResponse.ok) {
             const acuityData = await acuityResponse.json();
             console.log(`[/api/dashboard/kpis] Fallback data:`, JSON.stringify(acuityData).substring(0, 500));
@@ -1556,19 +1586,19 @@ export async function registerRoutes(
         console.error(`[/api/dashboard/kpis] Both LOCAL endpoints returned no data for facilityId ${facilityId}`);
         return res.status(500).json({ status: false, error: "No KPI data available for this facility" });
       }
-      
+
       console.log(`[/api/dashboard/kpis] Using ${usedEndpoint} for ${usedPeriod}`);
-      
+
       // Transform the backend response into KPI format
       const kpisData = transformToKPIsFormat(backendData);
-      
+
       // Fetch reports generated count directly from wound_encounters table for the selected date range
       try {
         const reportsCountResponse = await fetchWithTimeout(
           BACKEND_API_URL,
           {
             method: "POST",
-            headers: { 
+            headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -1583,11 +1613,11 @@ export async function registerRoutes(
             }),
           }
         );
-        
+
         if (reportsCountResponse.ok) {
           const reportsCountData = await reportsCountResponse.json();
           console.log(`[/api/dashboard/kpis] Reports count from wound_encounters:`, reportsCountData);
-          
+
           if (reportsCountData.status && reportsCountData.data) {
             // Replace reportsGenerated with actual count from wound_encounters
             if (kpisData.data && kpisData.data.reportsGenerated) {
@@ -1600,9 +1630,9 @@ export async function registerRoutes(
       } catch (err) {
         console.log(`[/api/dashboard/kpis] Error fetching reports count, using calculated value:`, (err as Error).message);
       }
-      
+
       console.log(`[/api/dashboard/kpis] Transformed KPIs for ${usedPeriod}:`, kpisData);
-      
+
       res.json(kpisData);
     } catch (error) {
       console.error("/api/dashboard/kpis error:", error);
@@ -1616,7 +1646,7 @@ export async function registerRoutes(
   // Transform backend etiology data into chart format
   function transformToEtiologyFormat(backendData: any) {
     const data = backendData.data || backendData;
-    
+
     // Pastel colors with strokes - must use hex values since this runs on server (no CSS access)
     // These match the --etiology-N-fill and --etiology-N-stroke CSS variables in index.css
     const ETIOLOGY_COLORS = [
@@ -1631,29 +1661,60 @@ export async function registerRoutes(
       { fill: "#fecaca", stroke: "#ef4444" },   // Red pastel
       { fill: "#e5e7eb", stroke: "#6b7280" },   // Gray pastel
     ];
-    
+
     // If data is already an array, transform it
     if (Array.isArray(data)) {
-      const transformed = data
-        .map((item: any, index: number) => {
-          // Handle different field name variations
-          let name = item.name || item.etiology || item.woundEtiology;
-          
-          // Replace "null" string with "Others"
-          if (name === 'null' || name === null || !name || name === '') {
-            name = "Others";
-          }
-          
-          const value = item.value || item.count || 0;
-          const colorIndex = index % ETIOLOGY_COLORS.length;
-          
-          return {
-            name: String(name).trim(),
-            value: Number(value),
-            fill: ETIOLOGY_COLORS[colorIndex].fill,
-            stroke: ETIOLOGY_COLORS[colorIndex].stroke
-          };
-        });
+      // Check if data uses metric_name/metric_value format (from facility.etiology_distribution SP)
+      const isMetricFormat = data.length > 0 && data[0].metric_name !== undefined;
+
+      let transformed: Array<{ name: string; value: number; fill: string; stroke: string }>;
+
+      if (isMetricFormat) {
+        // SP returns rows like: { metric_name: "Number of Arterial", metric_value: "2.000000" }
+        // and { metric_name: "Percentage of Arterial", metric_value: "22.222" }
+        // We only want the "Number of" rows for the pie chart counts
+        transformed = data
+          .filter((item: any) => {
+            const name = String(item.metric_name || '');
+            return name.startsWith('Number of ');
+          })
+          .map((item: any, index: number) => {
+            // Extract etiology name by removing "Number of " prefix
+            let name = String(item.metric_name || '').replace(/^Number of\s+/i, '').trim();
+            if (!name || name === 'null') name = "Others";
+
+            const value = parseFloat(item.metric_value) || 0;
+            const colorIndex = index % ETIOLOGY_COLORS.length;
+
+            return {
+              name,
+              value: Math.round(value), // Counts should be integers
+              fill: ETIOLOGY_COLORS[colorIndex].fill,
+              stroke: ETIOLOGY_COLORS[colorIndex].stroke
+            };
+          });
+      } else {
+        transformed = data
+          .map((item: any, index: number) => {
+            // Handle different field name variations
+            let name = item.name || item.etiology || item.woundEtiology;
+
+            // Replace "null" string with "Others"
+            if (name === 'null' || name === null || !name || name === '') {
+              name = "Others";
+            }
+
+            const value = item.value || item.count || 0;
+            const colorIndex = index % ETIOLOGY_COLORS.length;
+
+            return {
+              name: String(name).trim(),
+              value: Number(value),
+              fill: ETIOLOGY_COLORS[colorIndex].fill,
+              stroke: ETIOLOGY_COLORS[colorIndex].stroke
+            };
+          });
+      }
 
       return {
         status: true,
@@ -1661,11 +1722,11 @@ export async function registerRoutes(
         source: "backend"
       };
     }
-    
+
     // Handle object with etiology breakdown
-    const etiologyArray: Array<{name: string, value: number, fill: string, stroke: string}> = [];
+    const etiologyArray: Array<{ name: string, value: number, fill: string, stroke: string }> = [];
     let colorIndex = 0;
-    
+
     for (const [key, value] of Object.entries(data)) {
       if (typeof value === 'number') {
         etiologyArray.push({
@@ -1677,7 +1738,7 @@ export async function registerRoutes(
         colorIndex++;
       }
     }
-    
+
     return {
       status: true,
       data: etiologyArray.length > 0 ? etiologyArray : [],
@@ -1693,14 +1754,14 @@ export async function registerRoutes(
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     const token = req.headers.authorization?.replace("Bearer ", "");
     const requestEmail = req.body?.email || req.query?.email;
-    
+
     // Get date range from query params
     const startDateParam = req.query?.startDate;
     const endDateParam = req.query?.endDate;
-    
+
     console.log(`[/api/dashboard/wound-etiology] Called with facilityId: ${facilityId}`);
     console.log(`[/api/dashboard/wound-etiology] Date params - startDate: ${startDateParam}, endDate: ${endDateParam}`);
-    
+
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
     }
@@ -1709,7 +1770,7 @@ export async function registerRoutes(
       // Use provided dates or fallback to last 30 days
       let startDateStr: string;
       let endDateStr: string;
-      
+
       if (startDateParam && endDateParam) {
         startDateStr = startDateParam;
         endDateStr = endDateParam;
@@ -1722,18 +1783,18 @@ export async function registerRoutes(
       }
 
       console.log(`[/api/dashboard/wound-etiology] Calling LOCAL rptEtiologyDistribution for facilityId: ${facilityId}, dosStart: ${startDateStr}, dosEnd: ${endDateStr}`);
-      
+
       // Use a system token if no user token is available (ONLY in development)
       // UUID format is accepted by FacilityDataCenter.validateToken()
       const isDev = process.env.NODE_ENV === 'development';
       const systemToken = isDev ? "38521445-2BBB-40B0-84CD-4AA2C98701C1" : null;
       const authToken = token || systemToken;
-      
+
       if (!authToken) {
         console.error(`[/api/dashboard/wound-etiology] No auth token available in production`);
         return res.status(401).json({ status: false, error: "Authentication required" });
       }
-      
+
       try {
         // Call local API endpoint for etiology distribution
         const etiologyResponse = await fetchWithTimeout(
@@ -1758,7 +1819,7 @@ export async function registerRoutes(
 
         if (etiologyResponse.ok) {
           const etiologyData = await etiologyResponse.json();
-          
+
           if (etiologyData.status && etiologyData.data && etiologyData.data.length > 0) {
             console.log(`[/api/dashboard/wound-etiology] ✅ Found ${etiologyData.data.length} etiology items`);
             const transformedData = transformToEtiologyFormat(etiologyData);
@@ -1785,7 +1846,7 @@ export async function registerRoutes(
   // Transform backend wound reduction data into chart format
   function transformToWoundReductionFormat(backendData: any) {
     let data = backendData.data || backendData;
-    
+
     // If data is already an array with month/reduction structure, use it
     if (Array.isArray(data) && data.length > 0 && data[0].month) {
       return {
@@ -1794,24 +1855,24 @@ export async function registerRoutes(
         source: "backend"
       };
     }
-    
+
     // If data is an array of weekly data, convert to monthly
     if (Array.isArray(data) && data.length > 0) {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const monthlyData: any = {};
-      
+
       // Group weekly data by month
       for (const week of data) {
         const reduction = Math.random() * 15 + 10; // Simulate 10-25% reduction
         const monthIndex = new Date().getMonth();
         const monthName = months[monthIndex];
-        
+
         if (!monthlyData[monthName]) {
           monthlyData[monthName] = [];
         }
         monthlyData[monthName].push(reduction);
       }
-      
+
       // Convert to average monthly data
       const last6Months = [];
       const currentMonth = new Date().getMonth();
@@ -1820,25 +1881,25 @@ export async function registerRoutes(
         const monthName = months[monthIndex];
         const reductions = monthlyData[monthName] || [12 + Math.random() * 10];
         const avgReduction = Math.round(reductions.reduce((a: number, b: number) => a + b, 0) / reductions.length);
-        
+
         last6Months.push({
           month: monthName,
           reduction: Math.min(avgReduction, 25)
         });
       }
-      
+
       return {
         status: true,
         data: last6Months,
         source: "backend"
       };
     }
-    
+
     // Generate mock month-over-month data if not available
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonth = new Date().getMonth();
     const last6Months = [];
-    
+
     for (let i = 5; i >= 0; i--) {
       const monthIndex = (currentMonth - i + 12) % 12;
       const reduction = 10 + Math.random() * 15; // Random reduction between 10-25%
@@ -1847,7 +1908,7 @@ export async function registerRoutes(
         reduction: Math.round(reduction)
       });
     }
-    
+
     return {
       status: true,
       data: last6Months,
@@ -1859,24 +1920,24 @@ export async function registerRoutes(
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     const token = req.headers.authorization?.replace("Bearer ", "");
     const requestEmail = req.body?.email || req.query?.email;
-    
+
     // Use a system token if no user token is available (ONLY in development)
     const isDev = process.env.NODE_ENV === 'development';
     const systemToken = isDev ? "38521445-2BBB-40B0-84CD-4AA2C98701C1" : null;
     const authToken = token || systemToken;
-    
+
     if (!authToken) {
       console.error(`[/api/dashboard/wound-reduction] No auth token available in production`);
       return res.status(401).json({ status: false, error: "Authentication required" });
     }
-    
+
     // Get date range from query params
     const startDateParam = req.query?.startDate;
     const endDateParam = req.query?.endDate;
-    
+
     console.log(`[/api/dashboard/wound-reduction] Called with facilityId: ${facilityId}`);
     console.log(`[/api/dashboard/wound-reduction] Date params - startDate: ${startDateParam}, endDate: ${endDateParam}`);
-    
+
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
     }
@@ -1884,11 +1945,11 @@ export async function registerRoutes(
     try {
       let backendData = null;
       let usedPeriod = null;
-      
+
       // If date params are provided, use them directly first
       if (startDateParam && endDateParam) {
         console.log(`[/api/dashboard/wound-reduction] Using provided date range: ${startDateParam} to ${endDateParam}`);
-        
+
         try {
           const reductionResponse = await fetchWithTimeout(
             BACKEND_API_URL,
@@ -1920,7 +1981,7 @@ export async function registerRoutes(
           console.log(`[/api/dashboard/wound-reduction] Error with provided dates:`, (err as Error).message);
         }
       }
-      
+
       // Fallback: Use date range fallback strategy: 30d → 90d → 180d → 365d
       if (!backendData) {
         const today = new Date();
@@ -1930,14 +1991,14 @@ export async function registerRoutes(
           { days: 180, label: "Last 180 days" },
           { days: 365, label: "Last 365 days" }
         ];
-        
+
         // Try wound-outcome-global endpoint with fallback date ranges
         for (const range of dateRanges) {
           const startDate = new Date(today);
           startDate.setDate(startDate.getDate() - range.days);
           const startDateStr = startDate.toISOString().split('T')[0];
           const endDateStr = today.toISOString().split('T')[0];
-          
+
           console.log(`[/api/dashboard/wound-reduction] Trying ${range.label} (${startDateStr} to ${endDateStr})`);
           try {
             const reductionResponse = await fetchWithTimeout(
@@ -2010,10 +2071,10 @@ export async function registerRoutes(
         console.error(`[/api/dashboard/wound-reduction] No data available for facilityId ${facilityId}`);
         return res.status(500).json({ status: false, error: "No wound reduction data available" });
       }
-      
+
       const reductionData = transformToWoundReductionFormat(backendData);
       console.log(`[/api/dashboard/wound-reduction] Transformed reduction:`, reductionData);
-      
+
       res.json(reductionData);
     } catch (error) {
       console.error("/api/dashboard/wound-reduction error:", error);
@@ -2027,14 +2088,14 @@ export async function registerRoutes(
   // Transform backend healing status data into chart format
   function transformToHealingStatusFormat(backendData: any) {
     const data = backendData.data || backendData;
-    
+
     // If data is a wound-outcome format, extract healing status percentages
     if (Array.isArray(data) && data.length > 0 && data[0]["Percent of Wounds Improving"] !== undefined) {
       const firstItem = data[0];
       const improving = parseFloat(firstItem["Percent of Wounds Improving"]) || 0;
       const deteriorating = parseFloat(firstItem["Percent of Wounds Deteriorating"]) || 0;
       const stable = 100 - improving - deteriorating;
-      
+
       return {
         status: true,
         data: [
@@ -2045,7 +2106,7 @@ export async function registerRoutes(
         source: "backend"
       };
     }
-    
+
     // If data is already an array with status structure, use it
     if (Array.isArray(data) && data.length > 0 && (data[0].status || data[0].woundStatus || data[0].name)) {
       // Define color mapping for healing status
@@ -2056,7 +2117,7 @@ export async function registerRoutes(
         'Deteriorating': 'hsl(var(--chart-4))',  // Red/Orange
         'New': 'hsl(var(--chart-3))',            // Yellow
       };
-      
+
       return {
         status: true,
         data: data.map((item: any, index: number) => {
@@ -2070,14 +2131,14 @@ export async function registerRoutes(
         source: "backend"
       };
     }
-    
+
     // Generate mock healing status data if not available
     const defaultStatuses = [
       { status: "Improving", percentage: 55, fill: "hsl(var(--chart-2))" },
       { status: "Stable", percentage: 30, fill: "hsl(var(--chart-1))" },
       { status: "Deteriorating", percentage: 15, fill: "hsl(var(--chart-4))" },
     ];
-    
+
     return {
       status: true,
       data: defaultStatuses,
@@ -2089,29 +2150,29 @@ export async function registerRoutes(
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     const token = req.headers.authorization?.replace("Bearer ", "");
     const requestEmail = req.body?.email || req.query?.email;
-    
+
     // Use a system token if no user token is available (ONLY in development)
     const isDev = process.env.NODE_ENV === 'development';
     const systemToken = isDev ? "38521445-2BBB-40B0-84CD-4AA2C98701C1" : null;
     const authToken = token || systemToken;
-    
+
     if (!authToken) {
       console.error(`[/api/dashboard/healing-status] No auth token available in production`);
       return res.status(401).json({ status: false, error: "Authentication required" });
     }
-    
+
     // Get date params for healing status
     const startDate = req.query.startDate || req.body?.startDate;
     const endDate = req.query.endDate || req.body?.endDate;
     console.log(`[/api/dashboard/healing-status] Called with facilityId: ${facilityId}, dates: ${startDate} - ${endDate}`);
-    
+
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
     }
 
     try {
       console.log(`[/api/dashboard/healing-status] Calling LOCAL rptWoundHealingStatus for facilityId: ${facilityId}`);
-      
+
       try {
         // Call local API endpoint for wound healing status (progress-based)
         const healingStatusResponse = await fetchWithTimeout(
@@ -2134,7 +2195,7 @@ export async function registerRoutes(
 
         if (healingStatusResponse.ok) {
           const healingStatusData = await healingStatusResponse.json();
-          
+
           if (healingStatusData.status && healingStatusData.data && healingStatusData.data.length > 0) {
             console.log(`[/api/dashboard/healing-status] ✅ Found ${healingStatusData.data.length} healing status items`);
             const transformedData = transformToHealingStatusFormat(healingStatusData);
@@ -2190,7 +2251,7 @@ export async function registerRoutes(
   // Transform backend wounds by status data into chart format
   function transformToWoundsByStatusFormat(backendData: any) {
     const data = backendData.data || backendData;
-    
+
     // If data is already an array with status/count structure, use it
     if (Array.isArray(data) && data.length > 0 && (data[0].status || data[0].name)) {
       return {
@@ -2202,7 +2263,7 @@ export async function registerRoutes(
         source: "backend"
       };
     }
-    
+
     // Generate default wounds by status data if not available
     const defaultStatuses = [
       { status: "Admitted", count: 12 },
@@ -2210,7 +2271,7 @@ export async function registerRoutes(
       { status: "Resolved", count: 32 },
       { status: "Hospitalized", count: 4 },
     ];
-    
+
     return {
       status: true,
       data: defaultStatuses,
@@ -2221,7 +2282,7 @@ export async function registerRoutes(
   const dashboardWoundsByStatusHandler = async (req: any, res: any) => {
     const facilityId = req.headers["x-facility-id"] || req.body?.facilityId;
     const authHeaders = getAuthHeaders(req);
-    
+
     if (!facilityId) {
       return res.status(400).json({ status: false, error: "Missing facility ID" });
     }
@@ -2242,10 +2303,10 @@ export async function registerRoutes(
 
       const backendData = await remoteResponse.json();
       console.log(`[/api/dashboard/wounds-by-status] Backend response:`, backendData);
-      
+
       const woundsByStatusData = transformToWoundsByStatusFormat(backendData);
       console.log(`[/api/dashboard/wounds-by-status] Transformed wounds by status:`, woundsByStatusData);
-      
+
       res.json(woundsByStatusData);
     } catch (error) {
       console.error("/api/dashboard/wounds-by-status error:", error);
@@ -2263,18 +2324,18 @@ export async function registerRoutes(
     const dosEnd = req.body?.dosEnd || req.query?.dosEnd || req.query?.endDate;
     const requestEmail = req.body?.email || req.query?.email;
     const token = req.headers.authorization?.replace("Bearer ", "");
-    
+
     // Use a system token if no user token is available (ONLY in development)
     const isDev = process.env.NODE_ENV === 'development';
     const systemToken = isDev ? "38521445-2BBB-40B0-84CD-4AA2C98701C1" : null;
     const authToken = token || systemToken;
-    
+
     console.log(`[/api/dashboard/wound-reduction-median] Called with facilityId: ${facilityId}, dosStart: ${dosStart}, dosEnd: ${dosEnd}`);
 
     if (!facilityId || !dosStart || !dosEnd) {
       return res.status(400).json({ status: false, error: "Missing required parameters: facilityId, dosStart, dosEnd" });
     }
-    
+
     if (!authToken) {
       console.error(`[/api/dashboard/wound-reduction-median] No auth token available in production`);
       return res.status(401).json({ status: false, error: "Authentication required" });
@@ -2282,7 +2343,7 @@ export async function registerRoutes(
 
     try {
       console.log(`[/api/dashboard/wound-reduction-median] Calling LOCAL woundReductionMedian for facilityId: ${facilityId}, dosStart: ${dosStart}, dosEnd: ${dosEnd}`);
-      
+
       const medianResponse = await fetchWithTimeout(
         BACKEND_API_URL,
         {
@@ -2308,21 +2369,21 @@ export async function registerRoutes(
 
       const backendData = await medianResponse.json();
       console.log(`[/api/dashboard/wound-reduction-median] Backend response:`, backendData);
-      
+
       if (backendData.status && backendData.data && backendData.data.length > 0) {
         // SP returns etiology-based weekly median data
         // Transform to match component's expected 8-field format
         const etiologyData = backendData.data;
-        
+
         console.log(`[/api/dashboard/wound-reduction-median] Received ${etiologyData.length} etiology rows`);
-        
+
         // Calculate aggregate statistics from etiology data
         const allCurrentWeekValues: number[] = [];
         const allOneWeekAgoValues: number[] = [];
         const allTwoWeeksAgoValues: number[] = [];
         const allThreeWeeksAgoValues: number[] = [];
         const allFourWeeksAgoValues: number[] = [];
-        
+
         // Collect all values from all etiologies
         etiologyData.forEach((row: any) => {
           const current = parseFloat(row['Current Week']);
@@ -2330,33 +2391,33 @@ export async function registerRoutes(
           const twoWeeksAgo = parseFloat(row['Two Weeks Ago']);
           const threeWeeksAgo = parseFloat(row['Three Weeks Ago']);
           const fourWeeksAgo = parseFloat(row['Four Weeks Ago']);
-          
+
           if (!isNaN(current)) allCurrentWeekValues.push(current);
           if (!isNaN(oneWeekAgo)) allOneWeekAgoValues.push(oneWeekAgo);
           if (!isNaN(twoWeeksAgo)) allTwoWeeksAgoValues.push(twoWeeksAgo);
           if (!isNaN(threeWeeksAgo)) allThreeWeeksAgoValues.push(threeWeeksAgo);
           if (!isNaN(fourWeeksAgo)) allFourWeeksAgoValues.push(fourWeeksAgo);
         });
-        
+
         // Helper function to calculate statistics
         const calculateStats = (values: number[]) => {
           if (values.length === 0) return { median: 0, avg: 0, min: 0, max: 0 };
-          
+
           const sorted = [...values].sort((a, b) => a - b);
           const len = sorted.length;
-          const median = len % 2 === 0 
-            ? (sorted[len / 2 - 1] + sorted[len / 2]) / 2 
+          const median = len % 2 === 0
+            ? (sorted[len / 2 - 1] + sorted[len / 2]) / 2
             : sorted[Math.floor(len / 2)];
           const avg = values.reduce((a, b) => a + b, 0) / len;
           const min = Math.min(...values);
           const max = Math.max(...values);
-          
+
           return { median, avg, min, max };
         };
-        
+
         // Calculate stats for current week (most relevant for "median_days")
         const currentWeekStats = calculateStats(allCurrentWeekValues);
-        
+
         // For other weeks, track min/max across all weeks
         const allWeekValues = [
           ...allCurrentWeekValues,
@@ -2366,13 +2427,13 @@ export async function registerRoutes(
           ...allFourWeeksAgoValues
         ];
         const overallStats = calculateStats(allWeekValues);
-        
+
         // Calculate stats for each week for the trend chart
         const oneWeekAgoStats = calculateStats(allOneWeekAgoValues);
         const twoWeeksAgoStats = calculateStats(allTwoWeeksAgoValues);
         const threeWeeksAgoStats = calculateStats(allThreeWeeksAgoValues);
         const fourWeeksAgoStats = calculateStats(allFourWeeksAgoValues);
-        
+
         // Build weekly trend data for line chart
         const weeklyTrend = [
           { week: '4 Weeks Ago', median: fourWeeksAgoStats.median, avg: fourWeeksAgoStats.avg },
@@ -2381,7 +2442,7 @@ export async function registerRoutes(
           { week: '1 Week Ago', median: oneWeekAgoStats.median, avg: oneWeekAgoStats.avg },
           { week: 'Current', median: currentWeekStats.median, avg: currentWeekStats.avg }
         ];
-        
+
         // Build response matching component's expected interface
         const transformedData = {
           median_days: currentWeekStats.median,
@@ -2394,9 +2455,9 @@ export async function registerRoutes(
           wounds_stable: Math.round(allCurrentWeekValues.length * 0.1), // Estimate: 10% stable
           weeklyTrend: weeklyTrend // Add weekly trend for line chart
         };
-        
+
         console.log(`[/api/dashboard/wound-reduction-median] ✅ Transformed data:`, transformedData);
-        
+
         res.json({
           status: true,
           data: transformedData,
@@ -2416,7 +2477,7 @@ export async function registerRoutes(
   app.post("/api/dashboard/wound-reduction-median", dashboardWoundReductionMedianHandler);
 
   // ============= GENERAL REPORT ENDPOINT =============
-  
+
   // Color mapping for wounds by status
   const woundsByStatusColors: Record<string, string> = {
     'Active': '#10b981',        // Green - active wounds being treated
@@ -2432,7 +2493,7 @@ export async function registerRoutes(
   app.post("/api/report", async (req, res) => {
     const { reportName, facilityId, status, email, startDate, endDate, token } = req.body;
     const authHeaders = getAuthHeaders(req);
-    
+
     // Use system token in dev mode if not provided
     const isDev = process.env.NODE_ENV === 'development';
     const systemToken = isDev ? "38521445-2BBB-40B0-84CD-4AA2C98701C1" : null;
@@ -2447,7 +2508,7 @@ export async function registerRoutes(
       if (reportName === "rptWoundsByStatus") {
         // Call local PHP backend with the SP
         console.log(`[/api/report] Calling LOCAL rptWoundsByStatus for facilityId: ${facilityId}, dates: ${startDate} - ${endDate}`);
-        
+
         const localResponse = await fetchWithTimeout(
           BACKEND_API_URL,
           {
@@ -2470,7 +2531,7 @@ export async function registerRoutes(
         if (localResponse.ok) {
           const localData = await localResponse.json();
           console.log(`[/api/report] rptWoundsByStatus response:`, localData);
-          
+
           if (localData.status && localData.data && localData.data.length > 0) {
             // Add colors to the data
             const dataWithColors = localData.data.map((item: any) => ({
@@ -2479,17 +2540,17 @@ export async function registerRoutes(
               value: item.count || item.value,
               color: woundsByStatusColors[item.status || item.name] || '#6b7280'
             }));
-            
+
             return res.json({
               status: true,
               data: dataWithColors
             });
           }
         }
-        
+
         // No data from local backend
         return res.json({ status: true, data: [] });
-        
+
       } else if (reportName === "etiologyReport") {
         const date = new Date().toISOString().split('T')[0];
         const remoteUrl = `${REMOTE_BACKEND_BASE}/api/reports/etiology-distribution/${facilityId}/${date}`;
@@ -2582,7 +2643,7 @@ export async function registerRoutes(
       // PHASE 1: VALIDACIÓN LOCAL (Mantener seguridad)
       // ====================================================================
       console.log("[/api/import-excel] Phase 1: Validating data locally");
-      
+
       const validationResult = validateImportData(data);
       if (!validationResult.isValid) {
         return res.status(400).json({
@@ -2599,7 +2660,7 @@ export async function registerRoutes(
       // PHASE 2: SANITIZAR Y PREPARAR DATOS
       // ====================================================================
       console.log("[/api/import-excel] Phase 2: Sanitizing data");
-      
+
       const sanitizedData = data.map(row => ({
         ...row,
         patient_id: sanitizeInput(row.patient_id),
@@ -2624,9 +2685,9 @@ export async function registerRoutes(
       // PHASE 3: DELEGAR A API EXTERNA
       // ====================================================================
       console.log("[/api/import-excel] Phase 3: Forwarding to external API");
-      
+
       const externalApiUrl = `${REMOTE_BACKEND_BASE}/api/import-excel`;
-      
+
       const externalResponse = await fetchWithTimeout(externalApiUrl, {
         method: 'POST',
         headers: {
@@ -2643,7 +2704,7 @@ export async function registerRoutes(
       if (!externalResponse.ok) {
         console.error(`[/api/import-excel] External API returned status ${externalResponse.status}`);
         const errorData = await externalResponse.json();
-        
+
         return res.status(externalResponse.status).json({
           status: false,
           message: 'Import processing failed at external API',
@@ -2653,7 +2714,7 @@ export async function registerRoutes(
       }
 
       const result = await externalResponse.json();
-      
+
       console.log(`[/api/import-excel] ✅ External API completed. Inserted: ${result.insertedCount}, Errors: ${result.errorCount || 0}`);
 
       // ====================================================================
@@ -2832,7 +2893,7 @@ export async function registerRoutes(
         if (checkResult.recordset.length > 0) {
           console.log("[/api/admin/setup-import-sp] SP already exists");
           await pool.close();
-          
+
           return res.json({
             status: true,
             message: "Stored procedure already exists",
@@ -3045,7 +3106,7 @@ export async function registerRoutes(
   app.post("/api/endpoints/pdf-import.php", uploadPdf.single('pdf'), async (req: any, res) => {
     try {
       console.log("[/api/endpoints/pdf-import.php] Received PDF upload request");
-      
+
       if (!req.file) {
         return res.status(400).json({
           success: false,
@@ -3061,22 +3122,22 @@ export async function registerRoutes(
       });
       formData.append('facility_id', req.body.facility_id || '1');
       formData.append('imported_by', req.body.imported_by || 'web-import');
-      
+
       // Forward force_facility parameter for discretionary imports (facility mismatch override)
       if (req.body.force_facility) {
         formData.append('force_facility', req.body.force_facility);
       }
 
       console.log(`[/api/endpoints/pdf-import.php] Forwarding to PHP, file: ${req.file.originalname} (${req.file.size} bytes), force_facility: ${req.body.force_facility || 'no'}`);
-      
+
       // Use http module with form-data (native fetch doesn't work with form-data package)
-      const phpResponse = await new Promise<{status: number, data: any}>((resolve, reject) => {
+      const phpResponse = await new Promise<{ status: number, data: any }>((resolve, reject) => {
         const request = formData.submit(`${PHP_LOCAL_BASE}/endpoints/pdf-import.php`, (err, response) => {
           if (err) {
             reject(err);
             return;
           }
-          
+
           let data = '';
           response.on('data', (chunk: any) => {
             data += chunk;
@@ -3097,7 +3158,7 @@ export async function registerRoutes(
       });
 
       console.log(`[/api/endpoints/pdf-import.php] PHP response status: ${phpResponse.status}, success: ${phpResponse.data.success}`);
-      
+
       res.status(phpResponse.status).json(phpResponse.data);
     } catch (error) {
       console.error("[/api/endpoints/pdf-import.php] Error:", error);
@@ -3167,7 +3228,7 @@ export async function registerRoutes(
   app.get("/api/import-audit", async (req, res) => {
     try {
       const { action, status, source_type, facility_id, limit, import_id } = req.query;
-      
+
       // Build query string for PHP endpoint
       const params = new URLSearchParams();
       if (action) params.append('action', action as string);
@@ -3211,7 +3272,7 @@ export async function registerRoutes(
   app.delete("/api/import-audit", async (req, res) => {
     try {
       const { import_id } = req.query;
-      
+
       if (!import_id) {
         return res.status(400).json({
           success: false,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { LOCAL_API } from '@/lib/api-config';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -145,7 +146,7 @@ const sourceTypeIcons: Record<string, React.ElementType> = {
 };
 
 // Sortable columns type
-type SortColumn = 'import_date' | 'original_filename' | 'facility_name' | 'records_inserted' | 'status' | 'processing_duration_ms';
+type SortColumn = 'import_date' | 'original_filename' | 'facility_name' | 'imported_by' | 'records_inserted' | 'status' | 'processing_duration_ms';
 type SortDirection = 'asc' | 'desc';
 
 export default function ImportAudit() {
@@ -157,7 +158,7 @@ export default function ImportAudit() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sortColumn, setSortColumn] = useState<SortColumn>('import_date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { getFacilities, getSelectedFacility, getAvailableFacilities } = useAuth();
@@ -176,9 +177,9 @@ export default function ImportAudit() {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (sourceFilter !== 'all') params.append('source_type', sourceFilter);
       params.append('limit', '100');
-      
+
       const response = await fetch(
-        `/api/import-audit?${params.toString()}`
+        `${LOCAL_API.IMPORT_AUDIT}?${params.toString()}`
       );
       if (!response.ok) throw new Error('Failed to fetch import logs');
       return response.json();
@@ -191,7 +192,7 @@ export default function ImportAudit() {
     queryKey: ['import-stats'],
     queryFn: async () => {
       const response = await fetch(
-        `/api/import-audit?action=stats`
+        `${LOCAL_API.IMPORT_AUDIT}?action=stats`
       );
       if (!response.ok) throw new Error('Failed to fetch stats');
       return response.json();
@@ -203,7 +204,7 @@ export default function ImportAudit() {
     mutationFn: async (importId: string) => {
       console.log('[ImportAudit] Attempting to revert import:', importId);
       const response = await fetch(
-        `/api/import-audit?import_id=${importId}`,
+        `${LOCAL_API.IMPORT_AUDIT}?import_id=${importId}`,
         { method: 'DELETE' }
       );
       console.log('[ImportAudit] Revert response status:', response.status);
@@ -234,19 +235,19 @@ export default function ImportAudit() {
       queryClient.invalidateQueries({ queryKey: ['facilityPatients'] });
       setShowRevertDialog(false);
       setImportToRevert(null);
-      
+
       // Refresh facilities to update total_wound_encounters count
       try {
         await getFacilities();
         // Dispatch event so all pages refresh their data
         dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
-        
+
         // Check if current facility has no more data
         const selectedFacilityId = getSelectedFacility();
         const facilities = getAvailableFacilities();
         const currentFacility = facilities.find(f => String(f.id) === String(selectedFacilityId));
         const totalEncounters = currentFacility?.total_wound_encounters ?? currentFacility?.totalWoundEncounters ?? 0;
-        
+
         if (totalEncounters === 0) {
           // Navigate to dashboard which will show No Data Available
           setLocation('/facility/');
@@ -275,7 +276,7 @@ export default function ImportAudit() {
   const sortedLogs = useMemo(() => {
     return [...logs].sort((a, b) => {
       const multiplier = sortDirection === 'asc' ? 1 : -1;
-      
+
       switch (sortColumn) {
         case 'import_date':
           return multiplier * (new Date(a.import_date).getTime() - new Date(b.import_date).getTime());
@@ -285,6 +286,8 @@ export default function ImportAudit() {
           return multiplier * ((a.facility_name || '').localeCompare(b.facility_name || ''));
         case 'records_inserted':
           return multiplier * (a.records_inserted - b.records_inserted);
+        case 'imported_by':
+          return multiplier * ((a.imported_by || '').localeCompare(b.imported_by || ''));
         case 'status':
           return multiplier * a.status.localeCompare(b.status);
         case 'processing_duration_ms':
@@ -312,7 +315,7 @@ export default function ImportAudit() {
     if (sortColumn !== column) {
       return <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />;
     }
-    return sortDirection === 'asc' 
+    return sortDirection === 'asc'
       ? <ArrowUp className="ml-1 h-3 w-3" />
       : <ArrowDown className="ml-1 h-3 w-3" />;
   };
@@ -526,7 +529,7 @@ export default function ImportAudit() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('import_date')}
                     >
@@ -535,7 +538,7 @@ export default function ImportAudit() {
                         {getSortIcon('import_date')}
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('original_filename')}
                     >
@@ -544,7 +547,7 @@ export default function ImportAudit() {
                         {getSortIcon('original_filename')}
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('facility_name')}
                     >
@@ -553,7 +556,16 @@ export default function ImportAudit() {
                         {getSortIcon('facility_name')}
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
+                      className="cursor-pointer select-none hover:bg-muted/50"
+                      onClick={() => handleSort('imported_by')}
+                    >
+                      <div className="flex items-center">
+                        Imported By
+                        {getSortIcon('imported_by')}
+                      </div>
+                    </TableHead>
+                    <TableHead
                       className="text-center cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('records_inserted')}
                     >
@@ -562,7 +574,7 @@ export default function ImportAudit() {
                         {getSortIcon('records_inserted')}
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('status')}
                     >
@@ -571,7 +583,7 @@ export default function ImportAudit() {
                         {getSortIcon('status')}
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none hover:bg-muted/50"
                       onClick={() => handleSort('processing_duration_ms')}
                     >
@@ -627,6 +639,14 @@ export default function ImportAudit() {
                                 {log.facility_name || 'Auto-detected'}
                               </div>
                             </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                                <User className="h-3 w-3 text-muted-foreground" />
+                                <span className="max-w-[150px] truncate" title={log.imported_by || undefined}>
+                                  {log.imported_by || 'System'}
+                                </span>
+                              </div>
+                            </TableCell>
                             <TableCell className="text-center">
                               <div className="flex items-center justify-center gap-1">
                                 <span className="text-green-600 font-medium">
@@ -676,7 +696,7 @@ export default function ImportAudit() {
                           {/* Expanded Details Row */}
                           {isExpanded && (
                             <TableRow className="bg-muted/30">
-                              <TableCell colSpan={8}>
+                              <TableCell colSpan={9}>
                                 <motion.div
                                   initial={{ opacity: 0, height: 0 }}
                                   animate={{ opacity: 1, height: 'auto' }}

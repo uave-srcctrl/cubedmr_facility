@@ -9,9 +9,21 @@ import { nanoid } from "nanoid";
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {
+  // Dynamic HMR configuration based on environment and headers
+  let hmrConfig: any = false;
+
+  if (process.env.NODE_ENV !== "production") {
+    // In development, detect the host from request headers on first connection
+    hmrConfig = {
+      // Use direct server for local development
+      server,
+      path: "/facility/vite-hmr",
+    };
+  }
+
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server, path: "/vite-hmr" },
+    hmr: hmrConfig,
     allowedHosts: true as const,
   };
 
@@ -42,7 +54,7 @@ export async function setupVite(server: Server, app: Express) {
     if (req.method !== "GET" && req.method !== "HEAD") {
       return next();
     }
-    
+
     const url = req.originalUrl;
 
     try {

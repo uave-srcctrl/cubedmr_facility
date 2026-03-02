@@ -58,7 +58,13 @@ export function useEnabledDates(facilityId: string | null, patientId?: string | 
         throw new Error("Invalid response format");
       }
 
-      return data.data;
+      // Normalize dates - handle PHP DateTime objects serialized as { date: "...", timezone_type, timezone }
+      return data.data.map((item: any) => {
+        if (typeof item === 'string') return item;
+        if (item?.date && typeof item.date === 'string') return item.date.substring(0, 10);
+        if (item instanceof Date) return item.toISOString().substring(0, 10);
+        return String(item);
+      });
     },
     enabled: !!facilityId && !!token && !!email,
     staleTime: 5 * 60 * 1000, // 5 minutes

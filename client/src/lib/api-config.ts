@@ -19,7 +19,9 @@ const IS_REMOTE = ENVIRONMENT === 'remote';
 const LOCAL_API_BASE = 'http://api.local/api';
 
 // Local Express server (for auth endpoints)
-const LOCAL_EXPRESS_BASE = '/api';
+// Uses /facility/api so requests go through Apache proxy (/facility → Express)
+// Express middleware strips /facility prefix before matching routes
+const LOCAL_EXPRESS_BASE = '/facility/api';
 
 // Remote API (Production) - External cubed-mr.app server
 const REMOTE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL_REMOTE || 'https://cubed-mr.app';
@@ -46,28 +48,28 @@ export const LOCAL_API = {
   LOGIN: `${LOCAL_EXPRESS_BASE}/get`,
   LOGOUT: `${LOCAL_EXPRESS_BASE}/logout`,
   HEALTH: `${LOCAL_EXPRESS_BASE}/health`,
-  
+
   // User/Facility - Uses Express server
   USER_PROFILE: `${LOCAL_EXPRESS_BASE}/user/profile`,
   FACILITY_METADATA: `${LOCAL_EXPRESS_BASE}/facility/metadata`,
-  
+
   // Flutter-like endpoints for user data and facilities - Uses Express server
   ENTITY_INFO: `${LOCAL_EXPRESS_BASE}/get`,
   GROUPS_BY_USER: `${LOCAL_EXPRESS_BASE}/get`,
   FACILITIES_LIST: `${LOCAL_EXPRESS_BASE}/get`,
-  
+
   // Reports - Uses Express server (generic report handler via proxy to local backend)
   REPORT: `${LOCAL_EXPRESS_BASE}/report`,
-  
+
   // Facility Wound Report - Uses Express server (routes to Slim app via local backend)
   FACILITY_WOUND_REPORT: `${LOCAL_EXPRESS_BASE}/facility-wound-report`,
-  
+
   // Facility Acuity Index - Uses Express server (routes to Slim app)
   FACILITY_ACUITY_INDEX: `${LOCAL_EXPRESS_BASE}/facility-acuity-index`,
-  
+
   // Etiology Distribution - Uses Express server (routes to Slim app)
   ETIOLOGY_DISTRIBUTION: `${LOCAL_EXPRESS_BASE}/etiology-distribution`,
-  
+
   // Dashboard - Uses Express server (which proxies to local backend for local dev)
   DASHBOARD_KPIS: `${LOCAL_EXPRESS_BASE}/dashboard/kpis`,
   DASHBOARD_WOUND_ETIOLOGY: `${LOCAL_EXPRESS_BASE}/dashboard/wound-etiology`,
@@ -75,7 +77,7 @@ export const LOCAL_API = {
   DASHBOARD_WOUND_REDUCTION_MEDIAN: `${LOCAL_EXPRESS_BASE}/dashboard/wound-reduction-median`,
   DASHBOARD_HEALING_STATUS: `${LOCAL_EXPRESS_BASE}/dashboard/healing-status`,
   DASHBOARD_WOUNDS_BY_STATUS: `${LOCAL_EXPRESS_BASE}/dashboard/wounds-by-status`,
-  
+
   // Import Audit - Uses Express server (routes to PHP backend)
   IMPORT_AUDIT: `${LOCAL_EXPRESS_BASE}/import-audit`,
 } as const;
@@ -115,18 +117,18 @@ export const API_CONFIG = {
   BACKEND_URL: ACTIVE_BACKEND_URL,
   API_BASE: ACTIVE_API_BASE,
   DEBUG: DEBUG_API,
-  
+
   // Endpoints that work for both environments
   LOGIN: `${ACTIVE_API_BASE}/get`,
   LOGOUT: `${ACTIVE_API_BASE}/logout`,
   HEALTH: `${ACTIVE_API_BASE}/health`,
-  
+
   // Reports
   REPORT: `${ACTIVE_API_BASE}/report`,
-  
+
   // Facilities
   FACILITIES_LIST: `${ACTIVE_API_BASE}/get`,
-  
+
   // Common endpoints for both local and remote
   GET: `${ACTIVE_API_BASE}/get`,
   ADD: `${ACTIVE_API_BASE}/add`,
@@ -161,7 +163,7 @@ export function setEnvironment(env: 'local' | 'remote') {
  */
 export function buildApiUrl(endpoint: string, params?: Record<string, string | number>): string {
   let url = `${ACTIVE_BACKEND_URL}${ACTIVE_API_BASE}/${endpoint.replace(/^\//, '')}`;
-  
+
   if (params) {
     const queryParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -169,6 +171,6 @@ export function buildApiUrl(endpoint: string, params?: Record<string, string | n
     });
     url += `?${queryParams.toString()}`;
   }
-  
+
   return url;
 }

@@ -41,6 +41,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useImport } from '@/contexts/import-context';
 import { createSampleExcel, validateExcelData, remapExcelColumns } from '@/lib/excel-utils';
 import { dispatchAuthEvent, AUTH_EVENTS } from '@/lib/auth-events';
+import { secureStorageSync } from '@/lib/secure-storage';
 
 interface ImportRow {
   [key: string]: any;
@@ -80,22 +81,22 @@ interface FileFormat {
 // Helper function to check if facility names match (fuzzy matching)
 function facilityNamesMatch(name1: string | undefined, name2: string | undefined): boolean {
   if (!name1 || !name2) return false;
-  
+
   const n1 = name1.toLowerCase().trim();
   const n2 = name2.toLowerCase().trim();
-  
+
   // Exact match
   if (n1 === n2) return true;
-  
+
   // One contains the other (partial match)
   if (n1.includes(n2) || n2.includes(n1)) return true;
-  
+
   // Normalized match (remove common suffixes)
-  const normalize = (s: string) => 
+  const normalize = (s: string) =>
     s.replace(/\s+(nursing|home|center|facility|care|medical)$/i, '')
-     .replace(/\s+/g, ' ')
-     .trim();
-  
+      .replace(/\s+/g, ' ')
+      .trim();
+
   return normalize(n1) === normalize(n2);
 }
 
@@ -217,35 +218,35 @@ export default function DataImportPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { setImporting, setImportProgress } = useImport();
-  
+
   // Sync local processing state with global import context
   useEffect(() => {
     setImporting(isProcessing);
   }, [isProcessing, setImporting]);
-  
+
   useEffect(() => {
     setImportProgress(progress);
   }, [progress, setImportProgress]);
-  
+
   // Check if facility is selected
   const hasFacilitySelected = isFacilitySelected();
-  
+
   // Get current facility ID and info (null if not selected = pre-facility mode)
   const currentFacilityId = getSelectedFacility();
   const currentFacilityInfo = getSelectedFacilityInfo();
 
   // Auto-select first enabled format if current is disabled
   useEffect(() => {
-    const enabledFormats = FILE_FORMATS.filter(format => 
+    const enabledFormats = FILE_FORMATS.filter(format =>
       isComponentEnabled('data-import', `format-${format.id}`)
     );
-    
+
     // If no formats enabled, nothing to select
     if (enabledFormats.length === 0) return;
-    
+
     // Check if current selected format is still enabled
     const isCurrentEnabled = enabledFormats.some(f => f.id === selectedFormat);
-    
+
     // If current format is disabled, select first available
     if (!isCurrentEnabled) {
       setSelectedFormat(enabledFormats[0].id);
@@ -287,7 +288,7 @@ export default function DataImportPage() {
   const getValidExtensions = (format: string): string[] => {
     const formatConfig = FILE_FORMATS.find(f => f.id === format);
     if (!formatConfig) return [];
-    
+
     const extensions: string[] = [];
     Object.values(formatConfig.acceptedTypes).forEach(exts => {
       extensions.push(...exts.map(e => e.toLowerCase()));
@@ -311,9 +312,9 @@ export default function DataImportPage() {
         const fileName = file.name.toLowerCase();
         return validExtensions.some(ext => fileName.endsWith(ext));
       });
-      
+
       const skippedCount = acceptedFiles.length - validFiles.length;
-      
+
       // Show confirmation modal instead of processing immediately
       setPendingDirectoryFiles({
         validFiles,
@@ -328,15 +329,15 @@ export default function DataImportPage() {
   // Handle directory import confirmation
   const handleConfirmDirectoryImport = useCallback(() => {
     if (!pendingDirectoryFiles) return;
-    
+
     const { validFiles } = pendingDirectoryFiles;
-    
+
     if (validFiles.length === 0) {
       setShowDirectoryConfirm(false);
       setPendingDirectoryFiles(null);
       return;
     }
-    
+
     setFiles(validFiles);
     setImportResult(null);
     setPreviewData([]);
@@ -369,7 +370,7 @@ export default function DataImportPage() {
       formData.append('pdf', file);
       // Use current facility ID, or '0' for auto mode (pre-facility)
       formData.append('facility_id', currentFacilityId ? String(currentFacilityId) : '0');
-      formData.append('imported_by', localStorage.getItem('userEmail') || 'web-import');
+      formData.append('imported_by', secureStorageSync.getItem('userEmail') || 'web-import');
 
       setProgress(30);
 
@@ -388,14 +389,14 @@ export default function DataImportPage() {
           pdfFacilityName: result.pdf_facility_name || 'Unknown',
           selectedFacilityName: result.selected_facility_name || 'Unknown',
         });
-        
+
         // Store the file for re-import when user confirms
         setPendingMismatchFile(file);
-        
+
         // Show preview data
         const processedData: ImportRow[] = result.preview || [];
         setPreviewData(processedData.slice(0, 50));
-        
+
         // Show the facility mismatch modal
         setShowFacilityMismatchModal(true);
         setIsProcessing(false);
@@ -413,14 +414,14 @@ export default function DataImportPage() {
 
       // Transform preview data into ImportRow format
       const processedData: ImportRow[] = result.preview || [];
-      
+
       setPreviewData(processedData.slice(0, 50));
-      
+
       // Determine if all records were duplicates
-      const allDuplicates = result.records_found > 0 && 
-                           result.records_inserted === 0 && 
-                           result.records_skipped_duplicates === result.records_found;
-      
+      const allDuplicates = result.records_found > 0 &&
+        result.records_inserted === 0 &&
+        result.records_skipped_duplicates === result.records_found;
+
       // Build appropriate message
       let importMessage = '';
       if (allDuplicates) {
@@ -434,7 +435,7 @@ export default function DataImportPage() {
         const createdInfo = result.facility_created ? ' (new)' : '';
         importMessage = `PDF processed: ${result.records_inserted} of ${result.records_found} records imported${facilityInfo}${createdInfo}${result.records_skipped_duplicates > 0 ? ` (${result.records_skipped_duplicates} duplicates skipped)` : ''}`;
       }
-      
+
       setImportResult({
         success: !allDuplicates,
         message: importMessage,
@@ -452,13 +453,13 @@ export default function DataImportPage() {
       if (allDuplicates) {
         toast({
           title: 'Duplicate record',
-          description: result.records_found === 1 
-            ? 'This record already exists in the system' 
+          description: result.records_found === 1
+            ? 'This record already exists in the system'
             : `All ${result.records_found} records already exist in the system`,
           variant: 'destructive',
         });
       } else {
-        const facilityMsg = result.facility_name 
+        const facilityMsg = result.facility_name
           ? ` → ${result.facility_name}${result.facility_created ? ' (created)' : ''}`
           : '';
         toast({
@@ -623,7 +624,7 @@ export default function DataImportPage() {
   const readFileAsPromise = (file: File, format: string): Promise<ImportRow[]> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      
+
       reader.onload = (e) => {
         try {
           const content = e.target?.result;
@@ -652,7 +653,7 @@ export default function DataImportPage() {
           reject(error);
         }
       };
-      
+
       reader.onerror = () => reject(new Error('Failed to read file'));
 
       if (format === 'excel') {
@@ -668,7 +669,7 @@ export default function DataImportPage() {
     const formData = new FormData();
     formData.append('pdf', file);
     formData.append('facility_id', currentFacilityId ? String(currentFacilityId) : '0');
-    formData.append('imported_by', localStorage.getItem('userEmail') || 'web-import');
+    formData.append('imported_by', secureStorageSync.getItem('userEmail') || 'web-import');
 
     const response = await fetch('/api/endpoints/pdf-import.php', {
       method: 'POST',
@@ -701,7 +702,7 @@ export default function DataImportPage() {
     const formData = new FormData();
     formData.append('pdf', file);
     formData.append('facility_id', currentFacilityId ? String(currentFacilityId) : '0');
-    formData.append('imported_by', localStorage.getItem('userEmail') || 'web-import');
+    formData.append('imported_by', secureStorageSync.getItem('userEmail') || 'web-import');
     formData.append('force_facility', '1');
 
     const response = await fetch('/api/endpoints/pdf-import.php', {
@@ -767,7 +768,7 @@ export default function DataImportPage() {
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         const errorType = error?.errorType || 'processing_error';
-        
+
         // Check if this is a facility mismatch - collect for batch confirmation
         if (errorType === 'facility_mismatch' && error?.pdfFacilityName) {
           mismatchedFiles.push({
@@ -789,25 +790,25 @@ export default function DataImportPage() {
     }
 
     setProgress(100);
-    
-    // Build result message
+
+    // Build result message (directory import context)
     let message = '';
     if (format === 'pdf' || format === 'word') {
       // When there are mismatched files pending confirmation, focus on that message
       // instead of showing confusing "Processed 0 of X files. 0 records imported"
       if (mismatchedFiles.length > 0 && filesProcessed === 0) {
         // Only mismatches, no successfully processed files yet
-        message = `${mismatchedFiles.length} file(s) with facility mismatch pending confirmation`;
+        message = `Directory import: ${mismatchedFiles.length} file(s) with facility mismatch pending confirmation`;
       } else if (mismatchedFiles.length > 0) {
         // Some processed, some mismatched
-        message = `Processed ${filesProcessed} file(s). ${totalRecordsInserted} records imported`;
+        message = `Directory import: ${filesProcessed} of ${fileList.length} files processed, ${totalRecordsInserted} records imported`;
         if (totalRecordsSkipped > 0) {
           message += `, ${totalRecordsSkipped} duplicates skipped`;
         }
         message += `. ${mismatchedFiles.length} file(s) with facility mismatch pending confirmation`;
       } else {
-        // No mismatches - normal message
-        message = `Processed ${filesProcessed} of ${fileList.length} files. ${totalRecordsInserted} records imported`;
+        // No mismatches - normal directory message
+        message = `Directory import: ${fileList.length} files found, ${filesProcessed} processed successfully. ${totalRecordsInserted} records imported`;
         if (totalRecordsSkipped > 0) {
           message += `, ${totalRecordsSkipped} duplicates skipped`;
         }
@@ -816,12 +817,12 @@ export default function DataImportPage() {
         message += `. ${filesWithErrors} file(s) had errors`;
       }
     } else {
-      message = `Processed ${filesProcessed} of ${fileList.length} files. Total: ${allData.length} records`;
+      message = `Directory import: ${fileList.length} files found, ${filesProcessed} processed successfully. Total: ${allData.length} records`;
       if (filesWithErrors > 0) {
         message += `. ${filesWithErrors} file(s) had errors`;
       }
     }
-    
+
     setImportResult({
       success: allErrors.length === 0 && mismatchedFiles.length === 0,
       message,
@@ -832,7 +833,7 @@ export default function DataImportPage() {
 
     setPreviewData(allData.slice(0, 50));
     setIsProcessing(false);
-    
+
     // If there are mismatched files, show the directory mismatch modal
     if (mismatchedFiles.length > 0) {
       setPendingMismatchFiles(mismatchedFiles);
@@ -844,14 +845,14 @@ export default function DataImportPage() {
       });
     } else if (allErrors.length === 0) {
       toast({
-        title: 'Import completed successfully',
-        description: message,
+        title: 'Directory import completed',
+        description: `${filesProcessed} file(s) processed, ${totalRecordsInserted} records imported`,
         className: 'bg-green-500 text-white border-green-600',
       });
     } else {
       toast({
-        title: 'Import completed with errors',
-        description: `${filesWithErrors} file(s) had errors. Check the error list for details.`,
+        title: 'Directory import completed with errors',
+        description: `${filesProcessed} of ${fileList.length} file(s) processed. ${filesWithErrors} had errors.`,
         variant: 'destructive',
       });
     }
@@ -991,7 +992,7 @@ export default function DataImportPage() {
       if (!dataToImport) {
         throw new Error('No data to import');
       }
-      
+
       // Determine endpoint based on format
       let endpoint = '/api/import-data';
       if (selectedFormat === 'excel') {
@@ -1030,9 +1031,9 @@ export default function DataImportPage() {
       }));
 
       toast({
-          title: "Import successful",
-          description: `${result.insertedCount || dataToImport.length} records imported.`,
-        });
+        title: "Import successful",
+        description: `${result.insertedCount || dataToImport.length} records imported.`,
+      });
       // Refresh caches after import
       queryClient.invalidateQueries({ queryKey: ['enabledDates'] });
       queryClient.invalidateQueries({ queryKey: ['facilityPatientsByDate'] });
@@ -1052,7 +1053,7 @@ export default function DataImportPage() {
         message: `Import error: ${errorMessage}`,
         errors: [...(prev?.errors || []), errorMessage]
       }));
-      
+
       toast({
         title: "Import error",
         description: errorMessage,
@@ -1091,7 +1092,7 @@ export default function DataImportPage() {
   // Handle facility mismatch modal confirm - import at user's discretion
   const handleFacilityMismatchConfirm = async () => {
     setShowFacilityMismatchModal(false);
-    
+
     if (!pendingMismatchFile || !currentFacilityId) {
       toast({
         title: 'Error',
@@ -1108,7 +1109,7 @@ export default function DataImportPage() {
       const formData = new FormData();
       formData.append('pdf', pendingMismatchFile);
       formData.append('facility_id', String(currentFacilityId));
-      formData.append('imported_by', localStorage.getItem('userEmail') || 'web-import');
+      formData.append('imported_by', secureStorageSync.getItem('userEmail') || 'web-import');
       formData.append('force_facility', '1'); // Force import to selected facility
 
       setProgress(30);
@@ -1131,9 +1132,9 @@ export default function DataImportPage() {
       const processedData: ImportRow[] = result.preview || [];
       setPreviewData(processedData.slice(0, 50));
 
-      const allDuplicates = result.records_found > 0 && 
-                           result.records_inserted === 0 && 
-                           result.records_skipped_duplicates === result.records_found;
+      const allDuplicates = result.records_found > 0 &&
+        result.records_inserted === 0 &&
+        result.records_skipped_duplicates === result.records_found;
 
       let importMessage = '';
       if (allDuplicates) {
@@ -1179,7 +1180,7 @@ export default function DataImportPage() {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+
       setImportResult({
         success: false,
         message: `Error: ${errorMessage}`,
@@ -1210,7 +1211,7 @@ export default function DataImportPage() {
   // Handle directory mismatch modal confirm - import all mismatched files at user's discretion
   const handleDirectoryMismatchConfirm = async () => {
     setShowDirectoryMismatchModal(false);
-    
+
     if (pendingMismatchFiles.length === 0 || !currentFacilityId) {
       toast({
         title: 'Error',
@@ -1251,7 +1252,7 @@ export default function DataImportPage() {
 
       setProgress(100);
 
-      const message = `Processed ${filesProcessed} mismatched files. ${totalInserted} records imported${totalSkipped > 0 ? `, ${totalSkipped} duplicates skipped` : ''}${filesWithErrors > 0 ? `. ${filesWithErrors} file(s) had errors` : ''}`;
+      const message = `Directory import (forced): ${filesProcessed} mismatched files processed, ${totalInserted} records imported${totalSkipped > 0 ? `, ${totalSkipped} duplicates skipped` : ''}${filesWithErrors > 0 ? `. ${filesWithErrors} file(s) had errors` : ''}`;
 
       // Update import result
       setImportResult(prev => ({
@@ -1341,7 +1342,7 @@ export default function DataImportPage() {
         return JSON.stringify(sampleWoundRecords, null, 2);
       case 'xml':
         return '<?xml version="1.0"?>\n<records>\n' +
-          sampleWoundRecords.map(r => 
+          sampleWoundRecords.map(r =>
             `  <record>\n${Object.entries(r).map(([k, v]) => `    <${k}>${v}</${k}>`).join('\n')}\n  </record>`
           ).join('\n') +
           '\n</records>';
@@ -1373,7 +1374,7 @@ export default function DataImportPage() {
           Back to Facility Selection
         </Button>
       )}
-      
+
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Data Import</h1>
         <p className="text-muted-foreground">
@@ -1396,7 +1397,7 @@ export default function DataImportPage() {
             <TabsTrigger value="directory">Directory</TabsTrigger>
           </TabsList>
           <p className="text-sm text-muted-foreground">
-            {importMode === 'single' 
+            {importMode === 'single'
               ? 'Upload a single file to import data'
               : 'Upload multiple files from a directory for batch processing'
             }
@@ -1407,23 +1408,23 @@ export default function DataImportPage() {
       {/* Format selector */}
       {isComponentEnabled('data-import', 'format-selector') && (() => {
         // Filter formats based on isComponentEnabled for each format
-        const enabledFormats = FILE_FORMATS.filter(format => 
+        const enabledFormats = FILE_FORMATS.filter(format =>
           isComponentEnabled('data-import', `format-${format.id}`)
         );
-        
+
         // Dynamic sizing based on number of enabled formats
         const count = enabledFormats.length;
-        const iconSize = count <= 3 ? '[&>svg]:h-8 [&>svg]:w-8' 
-                       : count <= 5 ? '[&>svg]:h-6 [&>svg]:w-6' 
-                       : '[&>svg]:h-5 [&>svg]:w-5';
-        const textSize = count <= 3 ? 'text-base' 
-                       : count <= 5 ? 'text-sm' 
-                       : 'text-xs';
-        const padding = count <= 3 ? 'px-4 py-4' 
-                      : count <= 5 ? 'px-3 py-3' 
-                      : 'px-2 py-2';
+        const iconSize = count <= 3 ? '[&>svg]:h-8 [&>svg]:w-8'
+          : count <= 5 ? '[&>svg]:h-6 [&>svg]:w-6'
+            : '[&>svg]:h-5 [&>svg]:w-5';
+        const textSize = count <= 3 ? 'text-base'
+          : count <= 5 ? 'text-sm'
+            : 'text-xs';
+        const padding = count <= 3 ? 'px-4 py-4'
+          : count <= 5 ? 'px-3 py-3'
+            : 'px-2 py-2';
         const gap = count <= 3 ? 'gap-3' : 'gap-2';
-        
+
         return (
           <div className="flex gap-2 w-full">
             {enabledFormats.map((format) => (
@@ -1481,9 +1482,9 @@ export default function DataImportPage() {
                 }
               `}
             >
-              <input 
-                {...(getInputProps() as any)} 
-                {...(importMode === 'directory' ? { webkitdirectory: '', directory: '' } : {})} 
+              <input
+                {...(getInputProps() as any)}
+                {...(importMode === 'directory' ? { webkitdirectory: '', directory: '' } : {})}
               />
               <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
               <p className="font-medium text-foreground">
@@ -1561,17 +1562,17 @@ export default function DataImportPage() {
             {importResult && (
               <div className="space-y-4">
                 {/* Special alert for duplicates */}
-                {importResult.records_skipped_duplicates && importResult.records_skipped_duplicates > 0 && 
-                 importResult.records_found === importResult.records_skipped_duplicates ? (
+                {importResult.records_skipped_duplicates && importResult.records_skipped_duplicates > 0 &&
+                  importResult.records_found === importResult.records_skipped_duplicates ? (
                   <Alert variant="destructive" className="border-amber-500 bg-amber-50">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <AlertTitle className="text-amber-800">
-                      {importResult.records_found === 1 
-                        ? 'Duplicate Record' 
+                      {importResult.records_found === 1
+                        ? 'Duplicate Record'
                         : 'Duplicate Records'}
                     </AlertTitle>
                     <AlertDescription className="text-amber-700">
-                      {importResult.records_found === 1 
+                      {importResult.records_found === 1
                         ? 'The record you are trying to import already exists in the system. No changes were made.'
                         : `The ${importResult.records_found} records you are trying to import already exist in the system. No changes were made.`}
                     </AlertDescription>
@@ -1633,20 +1634,19 @@ export default function DataImportPage() {
                                     {fileError.filename}
                                   </span>
                                   {fileError.errorType && (
-                                    <Badge 
-                                      variant="outline" 
-                                      className={`text-xs ${
-                                        fileError.errorType === 'facility_mismatch' 
-                                          ? 'bg-amber-50 text-amber-700 border-amber-300'
-                                          : fileError.errorType === 'extraction_failed'
-                                            ? 'bg-red-50 text-red-700 border-red-300'
-                                            : 'bg-gray-50 text-gray-700 border-gray-300'
-                                      }`}
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-xs ${fileError.errorType === 'facility_mismatch'
+                                        ? 'bg-amber-50 text-amber-700 border-amber-300'
+                                        : fileError.errorType === 'extraction_failed'
+                                          ? 'bg-red-50 text-red-700 border-red-300'
+                                          : 'bg-gray-50 text-gray-700 border-gray-300'
+                                        }`}
                                     >
-                                      {fileError.errorType === 'facility_mismatch' ? 'Facility Mismatch' 
+                                      {fileError.errorType === 'facility_mismatch' ? 'Facility Mismatch'
                                         : fileError.errorType === 'extraction_failed' ? 'Extraction Failed'
-                                        : fileError.errorType === 'validation_error' ? 'Validation Error'
-                                        : fileError.errorType.replace(/_/g, ' ')}
+                                          : fileError.errorType === 'validation_error' ? 'Validation Error'
+                                            : fileError.errorType.replace(/_/g, ' ')}
                                     </Badge>
                                   )}
                                 </div>
@@ -1721,22 +1721,21 @@ export default function DataImportPage() {
                           {Object.entries(row).map(([key, value], colIdx) => {
                             // Highlight facility_name column with match indicator
                             const isFacilityCol = key.toLowerCase() === 'facility_name';
-                            const facilityMatch = isFacilityCol && currentFacilityInfo?.name 
+                            const facilityMatch = isFacilityCol && currentFacilityInfo?.name
                               ? facilityNamesMatch(currentFacilityInfo.name, String(value || ''))
                               : null;
-                            
+
                             return (
-                              <td 
-                                key={colIdx} 
-                                className={`px-4 py-3 text-xs whitespace-nowrap max-w-[250px] truncate ${
-                                  isFacilityCol 
-                                    ? facilityMatch === true 
-                                      ? 'bg-green-50 text-green-700 font-medium' 
-                                      : facilityMatch === false 
-                                        ? 'bg-red-50 text-red-700 font-medium'
-                                        : ''
-                                    : ''
-                                }`} 
+                              <td
+                                key={colIdx}
+                                className={`px-4 py-3 text-xs whitespace-nowrap max-w-[250px] truncate ${isFacilityCol
+                                  ? facilityMatch === true
+                                    ? 'bg-green-50 text-green-700 font-medium'
+                                    : facilityMatch === false
+                                      ? 'bg-red-50 text-red-700 font-medium'
+                                      : ''
+                                  : ''
+                                  }`}
                                 title={String(value || '')}
                               >
                                 {isFacilityCol && facilityMatch !== null && (
@@ -1758,22 +1757,21 @@ export default function DataImportPage() {
                   </table>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Showing {previewData.length} of {importResult?.records_found || importResult?.data?.length || previewData.length} records • 
-                  {Object.keys(previewData[0]).length} columns • 
+                  Showing {previewData.length} of {importResult?.records_found || importResult?.data?.length || previewData.length} records •
+                  {Object.keys(previewData[0]).length} columns •
                   Scroll horizontally to see all fields
                 </p>
                 {/* Facility verification summary */}
                 {currentFacilityInfo?.name && previewData.some(row => row.facility_name) && (() => {
-                  const matching = previewData.filter(row => 
+                  const matching = previewData.filter(row =>
                     row.facility_name && facilityNamesMatch(currentFacilityInfo.name, String(row.facility_name))
                   ).length;
                   const total = previewData.filter(row => row.facility_name).length;
                   const allMatch = matching === total;
-                  
+
                   return (
-                    <div className={`flex items-center gap-2 mt-2 p-2 rounded text-xs ${
-                      allMatch ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
-                    }`}>
+                    <div className={`flex items-center gap-2 mt-2 p-2 rounded text-xs ${allMatch ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
                       {allMatch ? (
                         <>
                           <CheckCircle className="h-4 w-4" />
@@ -1795,7 +1793,7 @@ export default function DataImportPage() {
             <div className="flex gap-2 pt-4 border-t border-border">
               {/* PDF/Word: already imported automatically by AI, don't show button */}
               {importResult?.success && selectedFormat !== 'pdf' && selectedFormat !== 'word' && (
-                <Button 
+                <Button
                   onClick={handleImport}
                   disabled={isProcessing}
                   className="flex-1"
@@ -1987,7 +1985,7 @@ export default function DataImportPage() {
                         <p className="text-xs text-green-600 dark:text-green-400">Valid files to import</p>
                       </div>
                     </div>
-                    
+
                     {pendingDirectoryFiles && pendingDirectoryFiles.skippedCount > 0 && (
                       <div className="bg-amber-50 dark:bg-amber-950 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
                         <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
@@ -1998,7 +1996,7 @@ export default function DataImportPage() {
                         </p>
                       </div>
                     )}
-                    
+
                     <div className="text-sm text-muted-foreground">
                       <p>Files preview:</p>
                       <div className="mt-1 max-h-24 overflow-y-auto space-y-1">

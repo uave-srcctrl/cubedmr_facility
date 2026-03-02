@@ -92,7 +92,7 @@ export function useAuth() {
   function setSelectedFacility(facilityId: string): void {
     if (typeof window === "undefined") return;
     secureStorageSync.setItem("selectedFacilityId", facilityId);
-    
+
     // Dispatch evento para que componentes se actualicen con el ID
     dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, facilityId);
   }
@@ -100,7 +100,7 @@ export function useAuth() {
   function clearSelectedFacility(): void {
     if (typeof window === "undefined") return;
     secureStorageSync.removeItem("selectedFacilityId");
-    
+
     // Dispatch evento para que componentes se actualicen
     dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, null);
   }
@@ -108,7 +108,7 @@ export function useAuth() {
   function getSelectedFacilityInfo(): Facility | null {
     const selectedId = getSelectedFacility();
     if (!selectedId) return null;
-    
+
     const facilities = getAvailableFacilities();
     return facilities.find(f => f.id === selectedId) || null;
   }
@@ -167,16 +167,16 @@ export function useAuth() {
 
   async function logout(): Promise<void> {
     if (typeof window === "undefined") return;
-    
+
     // Debug logging removed for HIPAA compliance
-    
+
     try {
       const token = getToken();
       const email = getEmail();
       const facilityId = getFacilityId();
-      
+
       // PHI logging removed for HIPAA compliance
-      
+
       if (token && email) {
         // Sending logout request to server
         const response = await fetch(LOCAL_API.LOGOUT, {
@@ -190,7 +190,7 @@ export function useAuth() {
             facility_id: facilityId,
           }),
         });
-        
+
         const logoutResponse = await response.json();
         // Response logging removed for HIPAA compliance
       } else {
@@ -219,14 +219,14 @@ export function useAuth() {
 
   function clearAuth(): void {
     if (typeof window === "undefined") return;
-    
+
     // HIPAA: Use secure storage clear for encrypted data
     secureStorageSync.clearSensitiveData();
-    
+
     // Also clear any remaining non-sensitive items
     localStorage.removeItem("userFacilities");
     localStorage.removeItem("userGroups");
-    
+
     // Dispatch logout event
     dispatchAuthEvent(AUTH_EVENTS.LOGOUT);
   }
@@ -420,14 +420,14 @@ export function useAuth() {
         deviceId = "web-" + Math.random().toString(36).substr(2, 9);
         localStorage.setItem("deviceId", deviceId);
       }
-      
+
       // Clean up token if it has extra quotes
       const cleanToken = token.replace(/^["']|["']$/g, '');
 
       // Get provider ID if user is a provider
       const userGroups = getUserGroups();
       const entityId = localStorage.getItem("userEntityId");
-      
+
       let providerId: string | undefined;
       let practiceId: string | undefined;
 
@@ -440,22 +440,22 @@ export function useAuth() {
       // Build request payload using FacilityDataCenter entity structure
       const requestPayload: any = {
         entity: "FacilityDataCenter",
-        method: "lstFacilitiesByWounds",  // Correct method for FacilityDataCenter entity
+        method: "lstAllFacilities",  // Changed from lstFacilitiesByWounds to get ALL facilities
         token: cleanToken,
         email,
         deviceId, // Include deviceId so server can calculate encountertrackid
       };
-      
+
       // Add optional parameters
       if (practiceId) requestPayload.practiceId = practiceId;
-      // Note: FacilityDataCenter doesn't require providerId/id - it returns all facilities for the user
+      // FacilityDataCenter.lstAllFacilities returns all facilities (optionally filtered by practiceId)
 
       // PHI logging removed for HIPAA compliance
 
       // Send as JSON to Express server
       const startTime = performance.now();
       // Request logging removed
-      
+
       const response = await fetch(LOCAL_API.FACILITIES_LIST, {
         method: "POST",
         headers: {
@@ -466,7 +466,7 @@ export function useAuth() {
 
       const endTime = performance.now();
       const duration = (endTime - startTime).toFixed(2);
-      
+
       // Performance logging removed for HIPAA compliance
 
       if (!response.ok) {
@@ -487,7 +487,7 @@ export function useAuth() {
 
       if (data.data && Array.isArray(data.data)) {
         // PHI logging removed for HIPAA compliance
-        
+
         const facilities: Facility[] = data.data.map((item: any) => ({
           id: item.id?.toString() || '',
           name: item.name || '',
@@ -508,13 +508,13 @@ export function useAuth() {
           createdAt: item.createdAt || '',
           updatedAt: item.updatedAt || '',
           timezone: item.timezone || 'UTC',
-          
+
           // Campos de heridas (si están disponibles)
           total_wound_encounters: item.total_wound_encounters,
           active_wounds: item.active_wounds,
           average_push_score: item.average_push_score,
           acuity_level: item.acuity_level,
-          
+
           // Fecha del último encounter
           last_encounter_date: item.last_encounter_date
         }));
@@ -530,15 +530,15 @@ export function useAuth() {
           seenIds.add(id);
           return true;
         });
-        
+
         // PHI logging removed for HIPAA compliance
 
         // Store facilities in localStorage
         setAvailableFacilities(uniqueFacilities);
-        
+
         // Dispatch event so components can refresh their data
         dispatchAuthEvent(AUTH_EVENTS.FACILITIES_UPDATED, { count: uniqueFacilities.length });
-        
+
         // PHI logging removed for HIPAA compliance
 
         return uniqueFacilities;
