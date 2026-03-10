@@ -1,0 +1,206 @@
+name: 🚀 Deploy All (React + API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_react:
+        description: 'Deploy React SPA'
+        required: true
+        default: true
+        type: boolean
+      deploy_api:
+        description: 'Deploy PHP API'
+        required: true
+        default: true
+        type: boolean
+      skip_tests:
+        description: 'Skip tests for faster deploy'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # ─── React SPA Deploy ─────────────────────────────────────────
+  build-react:
+    name: 🔨 Build React SPA
+    if: ${{ inputs.deploy_react }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install & Build
+        run: |
+          npm ci
+          npx vite build
+        env:
+          NODE_ENV: production
+
+      - name: Package
+        run: tar -czf facility-deploy.tar.gz dist/public/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facility-deploy
+          path: facility-deploy.tar.gz
+          retention-days: 3
+
+  deploy-react:
+    name: 🚀 Deploy React SPA
+    needs: build-react
+    if: ${{ inputs.deploy_react }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: facility-deploy
+
+      - name: 📝 Deploy info
+        id: info
+        run: |
+          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: 🔐 Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 7822 }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 📤 Upload & Deploy
+        run: |
+          scp -P ${{ secrets.DEPLOY_PORT || 7822 }} \
+            facility-deploy.tar.gz \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/facility-deploy.tar.gz
+
+          ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          set -e
+          cd /var/www/facility
+          mkdir -p backups
+          [ -d "dist/public" ] && tar -czf "backups/spa-$(date +%Y%m%d%H%M%S).tar.gz" dist/public/
+          ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+          tar -xzf /tmp/facility-deploy.tar.gz && rm -f /tmp/facility-deploy.tar.gz
+          chown -R www-data:www-data dist/public
+          chmod -R 644 dist/public && find dist/public -type d -exec chmod 755 {} \;
+          HTTP=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/facility/)
+          echo "✅ React SPA deployed (HTTP $HTTP)"
+          EOF
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
+
+  # ─── PHP API Deploy ────────────────────────────────────────────
+  deploy-api:
+    name: 🚀 Deploy PHP API
+    if: ${{ inputs.deploy_api }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: 📥 Checkout API repo
+        uses: actions/checkout@v4
+        with:
+          repository: Utility-Avenue/woundcare-api
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 📝 Deploy info
+        id: info
+        run: |
+          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: 📦 Create deployment package
+        run: |
+          tar -czf api-deploy.tar.gz \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='tests' \
+            --exclude='copilot-analysis' \
+            --exclude='*.backup' \
+            --exclude='*.bak' \
+            index.php model.php wec.php billing.php .htaccess \
+            facility-app-routes.php settings-endpoints.php \
+            encounter-pdf-import.php \
+            endpoints/ \
+            utils/rate-limiter.php utils/security-helpers.php \
+            sql/ \
+            composer.json composer.lock
+          echo "Package: $(ls -lh api-deploy.tar.gz | awk '{print $5}')"
+
+      - name: 🔐 Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 7822 }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 📤 Upload & Deploy
+        run: |
+          scp -P ${{ secrets.DEPLOY_PORT || 7822 }} \
+            api-deploy.tar.gz \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/api-deploy.tar.gz
+
+          ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          set -e
+          API_PATH="/var/www/prod/api"
+          cd "$API_PATH"
+
+          # Backup
+          BACKUP="backups/api-$(date +%Y%m%d%H%M%S)"
+          mkdir -p "$BACKUP"
+          cp *.php .htaccess "$BACKUP/" 2>/dev/null || true
+          cp -r endpoints "$BACKUP/" 2>/dev/null || true
+          ls -dt backups/api-* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
+
+          # Deploy
+          tar -xzf /tmp/api-deploy.tar.gz && rm -f /tmp/api-deploy.tar.gz
+
+          # Install composer deps if needed
+          if [ -f composer.json ] && [ ! -d vendor ]; then
+            php composer.phar install --no-dev --no-interaction 2>/dev/null || true
+          fi
+
+          # Permissions
+          chown -R root:www-data *.php .htaccess endpoints/ utils/ 2>/dev/null || true
+          chmod 644 *.php .htaccess 2>/dev/null || true
+          chmod 640 config.php .env 2>/dev/null || true
+
+          # Sync to /var/www/html/api/
+          echo "=== Syncing to html/api ==="
+          rsync -a --exclude='.git' --exclude='.env' --exclude='config.php' \
+            --exclude='vendor' --exclude='copilot-analysis' --exclude='backups' \
+            "$API_PATH/" /var/www/html/api/
+
+          # Verify
+          HTTP=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/api/ 2>/dev/null)
+          echo "✅ PHP API deployed (HTTP $HTTP)"
+          EOF
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa api-deploy.tar.gz
+
+  # ─── Summary ───────────────────────────────────────────────────
+  summary:
+    name: 📊 Deploy Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-react, deploy-api]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "### 🚀 Full Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| React SPA | ${{ needs.deploy-react.result == 'success' && '✅ Success' || needs.deploy-react.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PHP API   | ${{ needs.deploy-api.result == 'success' && '✅ Success' || needs.deploy-api.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY

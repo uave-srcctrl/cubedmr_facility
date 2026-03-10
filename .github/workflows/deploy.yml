@@ -1,9 +1,11 @@
-name: 🚀 Build & Deploy
+name: 🚀 Build & Deploy React SPA
 
 on:
   push:
     branches:
       - main
+  repository_dispatch:
+    types: [deploy-all]
   workflow_dispatch:
     inputs:
       skip_tests:
@@ -35,10 +37,10 @@ jobs:
       
       - name: ✅ Type check
         if: ${{ !inputs.skip_tests }}
-        run: npm run check || true
+        run: npx tsc --noEmit || true
       
       - name: 🔨 Build application
-        run: npm run build
+        run: npx vite build
         env:
           NODE_ENV: production
       
@@ -47,19 +49,14 @@ jobs:
           echo "### Build Output" >> $GITHUB_STEP_SUMMARY
           echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
           echo "|------|------|" >> $GITHUB_STEP_SUMMARY
-          ls -lhS dist/public/assets/*.js 2>/dev/null | awk '{print "| " $NF " | " $5 " |"}' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Server bundle:** $(ls -lh dist/index.cjs | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
+          find dist/public/assets -name "*.js" -o -name "*.css" 2>/dev/null | while read f; do
+            echo "| $(basename $f) | $(ls -lh $f | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
+          done
       
       - name: 📦 Create deployment package
         run: |
-          # Only include what's needed for production runtime
-          tar -czf facility-deploy.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            ecosystem.config.js
-          ls -lh facility-deploy.tar.gz
+          tar -czf facility-deploy.tar.gz dist/public/
+          echo "Package size: $(ls -lh facility-deploy.tar.gz | awk '{print $5}')"
       
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
@@ -69,7 +66,7 @@ jobs:
           retention-days: 5
 
   deploy:
-    name: 🚀 Deploy
+    name: 🚀 Deploy to Production
     runs-on: ubuntu-latest
     needs: build
     environment: production
@@ -105,49 +102,39 @@ jobs:
           set -e
           
           DEPLOY_PATH="/var/www/facility"
+          SPA_PATH="$DEPLOY_PATH/dist/public"
           TIMESTAMP="${{ steps.info.outputs.timestamp }}"
-          
-          # Setup Node/PM2 path
-          export PATH="/root/.nvm/versions/node/v20.19.6/bin:$PATH"
-          PM2_BIN="/root/.nvm/versions/node/v20.19.6/lib/node_modules/pm2/bin/pm2"
           
           cd "$DEPLOY_PATH" || exit 1
           
           echo "=== Creating backup ==="
           mkdir -p backups
-          if [ -d "dist" ]; then
-            cp -r dist "backups/dist-${TIMESTAMP}"
+          if [ -d "dist/public" ]; then
+            tar -czf "backups/spa-${TIMESTAMP}.tar.gz" dist/public/
             # Keep only last 5 backups
-            ls -dt backups/dist-* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
+            ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
           fi
           
-          echo "=== Extracting pre-built artifacts ==="
+          echo "=== Extracting built SPA ==="
           tar -xzf /tmp/facility-deploy.tar.gz
           rm -f /tmp/facility-deploy.tar.gz
           
-          echo "=== Syncing production dependencies ==="
-          npm ci --production --ignore-scripts 2>/dev/null || npm install --production 2>/dev/null || true
-          
-          echo "=== Restarting service ==="
-          $PM2_BIN restart wounddatacenter 2>/dev/null || \
-            $PM2_BIN start dist/index.cjs --name wounddatacenter 2>/dev/null
-          $PM2_BIN save 2>/dev/null || true
-          
-          sleep 3
+          echo "=== Setting permissions ==="
+          chown -R www-data:www-data "$SPA_PATH"
+          chmod -R 644 "$SPA_PATH"
+          find "$SPA_PATH" -type d -exec chmod 755 {} \;
           
           echo "=== Verifying ==="
-          $PM2_BIN list
-          
-          # Quick health check
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/health 2>/dev/null || echo "000")
-          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
-            echo "✅ Service responding (HTTP $HTTP_CODE)"
+          # Apache serves /facility/ from dist/public/ — no restart needed
+          HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/facility/ 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ SPA responding (HTTP $HTTP_CODE)"
           else
-            echo "⚠️ HTTP $HTTP_CODE - checking logs..."
-            $PM2_BIN logs wounddatacenter --lines 10 --nostream 2>/dev/null || true
+            echo "⚠️ HTTP $HTTP_CODE — checking Apache..."
+            systemctl status apache2 --no-pager -l | head -5
           fi
           
-          echo "✅ Deploy complete: $TIMESTAMP"
+          echo "✅ React SPA deploy complete: $TIMESTAMP"
           DEPLOY_SCRIPT
       
       - name: 🧹 Cleanup
@@ -157,6 +144,7 @@ jobs:
       - name: 📊 Deploy summary
         if: success()
         run: |
-          echo "### 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 React SPA Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** \`${{ steps.info.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Timestamp:** ${{ steps.info.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://cubed-mr.app/facility/" >> $GITHUB_STEP_SUMMARY
