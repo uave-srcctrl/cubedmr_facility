@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
+import { LOCAL_API } from "@/lib/api-config";
 
 interface EnabledDatesResponse {
   status: boolean;
@@ -41,7 +42,7 @@ export function useEnabledDates(facilityId: string | null, patientId?: string | 
         params.append('patient_id', patientId);
       }
 
-      const response = await fetch(`/api/enabled-dates?${params}`, {
+      const response = await fetch(`${LOCAL_API.ENABLED_DATES}?${params}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",

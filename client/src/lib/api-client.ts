@@ -1,9 +1,12 @@
 /**
  * Centralized API Client
- * Reduces code duplication by providing a unified way to make API calls
+ * 
+ * All API calls go directly to the PHP Slim API.
+ * Includes encountertrackid/providertrackid for FacilityDataCenter compatibility.
  */
 
 import { LOCAL_API } from "@/lib/api-config";
+import { sha256 } from "@/lib/crypto-utils";
 
 export interface ApiCallOptions {
   /** Token for authentication */
@@ -26,22 +29,24 @@ export interface ApiResponse<T = any> {
 }
 
 /**
+ * Compute encountertrackid (same algorithm as Flutter: SHA256(email + "38457487" + deviceId))
+ */
+async function computeTrackingFields(email: string, deviceId: string, token: string | null) {
+  const salt = `${email}38457487${deviceId}`;
+  const encountertrackid = await sha256(salt);
+  return {
+    encountertrackid,
+    providertrackid: token || undefined,
+  };
+}
+
+/**
  * Make an API call to the FacilityDataCenter entity
  * 
  * @param method - The method name to call (e.g., "lstFacilityPatients")
  * @param options - Authentication and additional parameters
  * @returns The API response data
  * @throws Error if the request fails or returns status: false
- * 
- * @example
- * ```typescript
- * const patients = await apiCall<FacilityPatient[]>("lstFacilityPatients", {
- *   token,
- *   email,
- *   deviceId,
- *   params: { facilityId: "123" }
- * });
- * ```
  */
 export async function apiCall<T = any>(
   method: string,
@@ -52,6 +57,8 @@ export async function apiCall<T = any>(
   if (!token || !email) {
     throw new Error("Session expired. Please log in again.");
   }
+
+  const tracking = await computeTrackingFields(email, deviceId, token);
 
   const response = await fetch(LOCAL_API.LOGIN, {
     method: "POST",
@@ -64,6 +71,7 @@ export async function apiCall<T = any>(
       token,
       email,
       deviceId,
+      ...tracking,
       ...params,
     }),
   });
@@ -96,6 +104,8 @@ export async function apiCallRaw<T = any>(
   }
 
   try {
+    const tracking = await computeTrackingFields(email, deviceId, token);
+
     const response = await fetch(LOCAL_API.LOGIN, {
       method: "POST",
       headers: {
@@ -107,6 +117,7 @@ export async function apiCallRaw<T = any>(
         token,
         email,
         deviceId,
+        ...tracking,
         ...params,
       }),
     });
@@ -117,9 +128,9 @@ export async function apiCallRaw<T = any>(
 
     return await response.json();
   } catch (error) {
-    return { 
-      status: false, 
-      error: error instanceof Error ? error.message : "Network error" 
+    return {
+      status: false,
+      error: error instanceof Error ? error.message : "Network error"
     };
   }
 }

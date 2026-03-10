@@ -22,7 +22,6 @@ import { NoFacilityData } from "@/components/no-facility-data";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { WoundsByEtiologyModal } from "@/components/wounds-by-etiology-modal";
-import { LOCAL_API } from "@/lib/api-config";
 import { normalizeFieldNamesArray } from "@/lib/field-mapper";
 import { useLocation } from "wouter";
 
@@ -45,21 +44,21 @@ interface EtiologyItem {
 }
 
 export default function EtiologyReport() {
-  const { getToken, getSelectedFacility } = useAuth();
+  const { getToken, getEmail, getSelectedFacility } = useAuth();
   const { isComponentEnabled } = useSettings();
-  
+
   // Check if facility has wound encounter data
   const { hasData: facilityHasData, facilityName } = useFacilityHasData();
-  
+
   // Use state for facilityId to support reactive updates
   const [facilityId, setFacilityId] = useState<string | null>(() => getSelectedFacility());
-  
+
   // Wounds by etiology modal state
   const [etiologyModalOpen, setEtiologyModalOpen] = useState(false);
   const [selectedEtiology, setSelectedEtiology] = useState<string | null>(null);
   const [pressedEtiologyIndex, setPressedEtiologyIndex] = useState<number | null>(null);
   const [hiddenEtiologies, setHiddenEtiologies] = useState<Set<string>>(new Set());
-  
+
   // Persisted date picker state
   const {
     startDate,
@@ -70,7 +69,7 @@ export default function EtiologyReport() {
     endDateStr,
     hasPersistedDates
   } = usePersistedDates({ facilityId });
-  
+
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
@@ -79,10 +78,10 @@ export default function EtiologyReport() {
     });
     return unsubscribe;
   }, []);
-  
+
   // Fetch enabled dates for the facility (dates with encounters)
   const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId);
-  
+
   // Get wounds by etiology data - only fetch when etiology is selected
   const { data: woundsByEtiologyData, isLoading: woundsByEtiologyLoading, refetch: refetchWoundsByEtiology } = useWoundsByEtiology(
     facilityId || '',
@@ -90,7 +89,7 @@ export default function EtiologyReport() {
     startDateStr,
     endDateStr
   );
-  
+
   // Calculate first encounter date from enabledDates
   const firstEncounterDate = useMemo(() => {
     if (enabledDates && enabledDates.length > 0) {
@@ -121,7 +120,7 @@ export default function EtiologyReport() {
     if (visibleEtiologyComponents <= 1) return 'grid gap-6 grid-cols-1';
     return 'grid gap-6 lg:grid-cols-2';
   }, [visibleEtiologyComponents]);
-  
+
   // Set initial dates when enabledDates are loaded (both start and end = last encounter)
   useEffect(() => {
     if (hasPersistedDates) return; // Don't override persisted dates
@@ -135,7 +134,7 @@ export default function EtiologyReport() {
 
   // Check if it's a single date (same start and end)
   const isSingleDate = startDateStr === endDateStr;
-  
+
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!facilityId) {
     return (
@@ -152,52 +151,38 @@ export default function EtiologyReport() {
   }
 
   const token = getToken();
-  
+  const email = getEmail();
+
   const [dataSource, setDataSource] = useState<'backend' | 'mock'>('mock');
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['etiologyReport', startDateStr, endDateStr, facilityId],
     queryFn: async () => {
-      const url = `${LOCAL_API.ETIOLOGY_DISTRIBUTION}?dosStart=${startDateStr}&dosEnd=${endDateStr}`;
-      
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Facility-Id": facilityId,
-      };
-      
-      // Add authentication header if available
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-      
-      const response = await fetch(url, { 
-        method: "GET",
-        headers 
+      // Fetch etiology distribution directly from PHP API
+      const { fetchFromPhpApi } = await import("@/lib/date-fallback");
+      const { transformEtiologyMetrics } = await import("@/lib/transforms");
+
+      const result = await fetchFromPhpApi("rptEtiologyDistribution", {
+        facilityId,
+        dosStart: startDateStr,
+        dosEnd: endDateStr,
+        email: email || "etiology-report",
+        token,
+        deviceId: "etiology-report",
       });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch data: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
+
       console.log('[EtiologyReport] Received response:', result);
-      
-      // Handle if result is wrapped in array or object
-      // etiology returns an array of items (not a single object like wound-outcome)
-      let data;
-      if (result.status === false) {
-        throw new Error(result.error || "Failed to fetch etiology data");
+
+      if (!result || result.status === false) {
+        throw new Error(result?.error || "Failed to fetch etiology data");
       }
-      
-      if (Array.isArray(result.data)) {
-        data = result.data;
-      } else if (result.data && Array.isArray(result.data)) {
-        data = result.data;
-      } else if (Array.isArray(result)) {
-        data = result;
-      } else {
-        data = [];
-      }
+
+      let data = result.data || result;
+      if (!Array.isArray(data)) data = [];
+
+      // Transform metric_name/metric_value format if needed
+      data = transformEtiologyMetrics(data);
+
       // Normalize field names from backend format
       return normalizeFieldNamesArray(data);
     },
@@ -263,14 +248,14 @@ export default function EtiologyReport() {
       <div>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
-              <p className="text-muted-foreground mt-1">
-                {isSingleDate 
-                  ? "Breakdown of wound types for selected date" 
-                  : "Breakdown of wound types for selected date range"}
-              </p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Wound Etiology Distribution</h1>
+            <p className="text-muted-foreground mt-1">
+              {isSingleDate
+                ? "Breakdown of wound types for selected date"
+                : "Breakdown of wound types for selected date range"}
+            </p>
           </div>
-          
+
           <div className="flex flex-col items-start gap-1">
             <div className="flex items-center gap-2 flex-wrap">
               <DatePicker
@@ -301,9 +286,9 @@ export default function EtiologyReport() {
               </p>
             )}
           </div>
+        </div>
       </div>
-      </div>
-      
+
       {/* <FacilityInfoBanner /> */}
 
       {error ? (
@@ -321,170 +306,170 @@ export default function EtiologyReport() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
           <AlertDescription>
-            {startDate && isSingleDate 
+            {startDate && isSingleDate
               ? `No records found for ${format(startDate, 'MMM dd, yyyy')}. Try selecting a different date.`
-              : startDate && endDate 
+              : startDate && endDate
                 ? `No records found for ${format(startDate, 'MMM dd')} - ${format(endDate, 'MMM dd')}. Try selecting a different date range.`
                 : 'Select a date range to view data.'}
           </AlertDescription>
         </Alert>
       ) : (
         <div className={etiologyGridClass}>
-            {isComponentEnabled('etiology-report', 'etiology-breakdown') && (
+          {isComponentEnabled('etiology-report', 'etiology-breakdown') && (
             <Card>
-                <CardHeader className="relative pb-2">
-                    <CardTitle>Wound Distribution</CardTitle>
-                    <CardDescription>
-                      {startDate && isSingleDate 
-                        ? `Proportion of wound types for ${format(startDate, 'MMM dd, yyyy')}`
-                        : startDate && endDate 
-                          ? `Proportion of wound types for ${format(startDate, 'MMM dd')} - ${format(endDate, 'MMM dd')}`
-                          : 'Proportion of wound types'}
-                    </CardDescription>
-                    <div className="absolute top-4 right-4">
-                        <DataSourceBadge source={dataSource} showLabel={false} />
-                    </div>
-                </CardHeader>
-                <CardContent className="relative pl-2 pr-2">
-                    {isLoading && !data ? (
-                        <EcgLoader title="Loading Wound Distribution..." minHeight="min-h-[450px]" />
-                    ) : (
-                        <div className="flex h-[450px] w-full gap-2 pl-1">
-                        {/* Legend on the left with scroll */}
-                        <div className="w-[120px] overflow-y-auto flex-shrink-0 py-4">
-                            <div className="space-y-2">
-                                {processedData.map((entry: any, index: number) => {
-                                    const isHidden = hiddenEtiologies.has(entry.name);
-                                    return (
-                                        <div 
-                                            key={`legend-${index}`} 
-                                            className="flex items-center gap-2 whitespace-nowrap cursor-pointer hover:bg-muted/50 rounded p-1 -m-1 transition-colors"
-                                            onClick={() => {
-                                                setHiddenEtiologies(prev => {
-                                                    const newSet = new Set(prev);
-                                                    if (newSet.has(entry.name)) {
-                                                        newSet.delete(entry.name);
-                                                    } else {
-                                                        newSet.add(entry.name);
-                                                    }
-                                                    return newSet;
-                                                });
-                                            }}
-                                        >
-                                            <div 
-                                                className="w-3 h-3 rounded-sm flex-shrink-0" 
-                                                style={{ backgroundColor: isHidden ? 'transparent' : entry.fill, border: isHidden ? `2px solid ${entry.stroke}` : `1px solid ${entry.stroke}` }}
-                                            />
-                                            <span className={`truncate text-xs ${isHidden ? 'line-through text-muted-foreground' : ''}`}>{entry.name}</span>
-                                        </div>
-                                    );
-                                })}
+              <CardHeader className="relative pb-2">
+                <CardTitle>Wound Distribution</CardTitle>
+                <CardDescription>
+                  {startDate && isSingleDate
+                    ? `Proportion of wound types for ${format(startDate, 'MMM dd, yyyy')}`
+                    : startDate && endDate
+                      ? `Proportion of wound types for ${format(startDate, 'MMM dd')} - ${format(endDate, 'MMM dd')}`
+                      : 'Proportion of wound types'}
+                </CardDescription>
+                <div className="absolute top-4 right-4">
+                  <DataSourceBadge source={dataSource} showLabel={false} />
+                </div>
+              </CardHeader>
+              <CardContent className="relative pl-2 pr-2">
+                {isLoading && !data ? (
+                  <EcgLoader title="Loading Wound Distribution..." minHeight="min-h-[450px]" />
+                ) : (
+                  <div className="flex h-[450px] w-full gap-2 pl-1">
+                    {/* Legend on the left with scroll */}
+                    <div className="w-[120px] overflow-y-auto flex-shrink-0 py-4">
+                      <div className="space-y-2">
+                        {processedData.map((entry: any, index: number) => {
+                          const isHidden = hiddenEtiologies.has(entry.name);
+                          return (
+                            <div
+                              key={`legend-${index}`}
+                              className="flex items-center gap-2 whitespace-nowrap cursor-pointer hover:bg-muted/50 rounded p-1 -m-1 transition-colors"
+                              onClick={() => {
+                                setHiddenEtiologies(prev => {
+                                  const newSet = new Set(prev);
+                                  if (newSet.has(entry.name)) {
+                                    newSet.delete(entry.name);
+                                  } else {
+                                    newSet.add(entry.name);
+                                  }
+                                  return newSet;
+                                });
+                              }}
+                            >
+                              <div
+                                className="w-3 h-3 rounded-sm flex-shrink-0"
+                                style={{ backgroundColor: isHidden ? 'transparent' : entry.fill, border: isHidden ? `2px solid ${entry.stroke}` : `1px solid ${entry.stroke}` }}
+                              />
+                              <span className={`truncate text-xs ${isHidden ? 'line-through text-muted-foreground' : ''}`}>{entry.name}</span>
                             </div>
-                        </div>
-                        {/* Chart */}
-                        <div className="flex-1 min-w-0">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                                    <Pie
-                                        data={processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name))}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={120}
-                                        outerRadius={190}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                        animationBegin={0}
-                                        animationDuration={800}
-                                        animationEasing="ease-out"
-                                        isAnimationActive={true}
-                                        onClick={(data, index) => {
-                                            if (data && data.name) {
-                                                setPressedEtiologyIndex(index);
-                                                setTimeout(() => {
-                                                    setPressedEtiologyIndex(null);
-                                                    setSelectedEtiology(data.name);
-                                                    setEtiologyModalOpen(true);
-                                                }, 150);
-                                            }
-                                        }}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        {processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name)).map((entry: any, index: number) => (
-                                            <Cell 
-                                                key={`cell-${index}`} 
-                                                fill={entry.fill}
-                                                stroke={entry.stroke}
-                                                strokeWidth={1}
-                                                style={{ 
-                                                    cursor: 'pointer',
-                                                    outline: 'none',
-                                                    transform: pressedEtiologyIndex === index ? 'scale(0.92)' : 'scale(1)',
-                                                    transformOrigin: 'center',
-                                                    transformBox: 'fill-box',
-                                                    transition: 'transform 0.15s ease-out'
-                                                }} 
-                                            />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip 
-                                        contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
-                                        itemStyle={{ color: 'hsl(var(--popover-foreground))' }}
-                                    />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    )}
-                </CardContent>
+                    {/* Chart */}
+                    <div className="flex-1 min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                          <Pie
+                            data={processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name))}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={120}
+                            outerRadius={190}
+                            paddingAngle={5}
+                            dataKey="value"
+                            animationBegin={0}
+                            animationDuration={800}
+                            animationEasing="ease-out"
+                            isAnimationActive={true}
+                            onClick={(data, index) => {
+                              if (data && data.name) {
+                                setPressedEtiologyIndex(index);
+                                setTimeout(() => {
+                                  setPressedEtiologyIndex(null);
+                                  setSelectedEtiology(data.name);
+                                  setEtiologyModalOpen(true);
+                                }, 150);
+                              }
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            {processedData.filter((entry: any) => !hiddenEtiologies.has(entry.name)).map((entry: any, index: number) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.fill}
+                                stroke={entry.stroke}
+                                strokeWidth={1}
+                                style={{
+                                  cursor: 'pointer',
+                                  outline: 'none',
+                                  transform: pressedEtiologyIndex === index ? 'scale(0.92)' : 'scale(1)',
+                                  transformOrigin: 'center',
+                                  transformBox: 'fill-box',
+                                  transition: 'transform 0.15s ease-out'
+                                }}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
+                            itemStyle={{ color: 'hsl(var(--popover-foreground))' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
             </Card>
-            )}
+          )}
 
-            {isComponentEnabled('etiology-report', 'patterns') && (
+          {isComponentEnabled('etiology-report', 'patterns') && (
             <Card>
-            <CardHeader className="relative pb-2">
+              <CardHeader className="relative pb-2">
                 <CardTitle>Detailed Etiology Count</CardTitle>
                 <CardDescription>Specific count and percentage for each wound type</CardDescription>
                 <div className="absolute top-4 right-4">
-                    <DataSourceBadge source={dataSource} showLabel={false} />
+                  <DataSourceBadge source={dataSource} showLabel={false} />
                 </div>
-            </CardHeader>
-            <CardContent className="relative pb-0">
+              </CardHeader>
+              <CardContent className="relative pb-0">
                 <Table>
-                <TableHeader>
+                  <TableHeader>
                     <TableRow>
-                    <TableHead className="w-[50%]">Wound Etiology</TableHead>
-                    <TableHead className="text-right">Count</TableHead>
-                    <TableHead className="text-right">Percentage</TableHead>
+                      <TableHead className="w-[50%]">Wound Etiology</TableHead>
+                      <TableHead className="text-right">Count</TableHead>
+                      <TableHead className="text-right">Percentage</TableHead>
                     </TableRow>
-                </TableHeader>
-                <TableBody>
+                  </TableHeader>
+                  <TableBody>
                     {processedData.map((item: any) => (
-                    <TableRow 
-                        key={item.name} 
+                      <TableRow
+                        key={item.name}
                         className="cursor-pointer hover:bg-muted/50 transition-colors"
                         onClick={() => {
-                            setSelectedEtiology(item.name);
-                            setEtiologyModalOpen(true);
+                          setSelectedEtiology(item.name);
+                          setEtiologyModalOpen(true);
                         }}
-                    >
+                      >
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="text-right">{item.value}</TableCell>
                         <TableCell className="text-right">{item.percentage.toFixed(2)}%</TableCell>
-                    </TableRow>
+                      </TableRow>
                     ))}
                     <TableRow className="bg-muted/50 font-bold">
-                        <TableCell>Total</TableCell>
-                        <TableCell className="text-right">{totalCount}</TableCell>
-                        <TableCell className="text-right">100%</TableCell>
+                      <TableCell>Total</TableCell>
+                      <TableCell className="text-right">{totalCount}</TableCell>
+                      <TableCell className="text-right">100%</TableCell>
                     </TableRow>
-                </TableBody>
+                  </TableBody>
                 </Table>
-            </CardContent>
+              </CardContent>
             </Card>
-            )}
+          )}
         </div>
       )}
-      
+
       {/* Wounds by Etiology Modal */}
       <WoundsByEtiologyModal
         patients={woundsByEtiologyData?.data || []}
@@ -503,25 +488,25 @@ export default function EtiologyReport() {
   );
 }
 
-function DatePicker({ 
-  date, 
-  setDate, 
-  label, 
+function DatePicker({
+  date,
+  setDate,
+  label,
   enabledDates,
   isLoading = false,
   defaultMonth
-}: { 
-  date: Date | undefined, 
-  setDate: (d: Date | undefined) => void, 
-  label: string, 
+}: {
+  date: Date | undefined,
+  setDate: (d: Date | undefined) => void,
+  label: string,
   enabledDates?: string[],
   isLoading?: boolean,
   defaultMonth?: Date
 }) {
   const [open, setOpen] = useState(false);
-  
+
   const enabledCount = enabledDates?.length ?? 0;
-  const dateInfo = enabledDates && enabledDates.length > 0 
+  const dateInfo = enabledDates && enabledDates.length > 0
     ? `${enabledCount} date${enabledCount !== 1 ? 's' : ''} available`
     : 'No dates available';
 

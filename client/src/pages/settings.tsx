@@ -608,10 +608,10 @@ export default function SettingsPage() {
                     {settings.autoSave ? 'âœ“' : 'â—‹'} Auto-save
                   </span>
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                    ðŸŽ¨ {settings.theme === 'system' ? 'System' : settings.theme === 'dark' ? 'Dark' : 'Light'} theme
+                    ðŸŽ¨ {settings.theme.mode === 'system' ? 'System' : settings.theme.mode === 'dark' ? 'Dark' : 'Light'} theme
                   </span>
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                    ðŸ“Š {settings.defaultChartType} charts
+                    ðŸ“Š {settings.charts?.[0]?.type || 'default'} charts
                   </span>
                 </div>
               </div>

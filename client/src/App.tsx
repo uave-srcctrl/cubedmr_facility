@@ -97,14 +97,14 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
   }, [isAuthenticated, facilitySelected, isAllowedRoute, wasAuthenticated, setLocation]);
 
   console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected, 'location:', location, 'isAllowedRoute:', isAllowedRoute);
-  
+
   if (!isAuthenticated) {
     console.log('[Router] NOT authenticated - showing Login component');
     // Pass a no-op onLogin since App.tsx will detect auth state changes automatically
     return <Login onLogin={() => {
       console.log("[Router] Login detected, waiting for auth state update...");
       // App.tsx will automatically detect the auth state change via the interval
-    }} />; 
+    }} />;
   }
 
   // Si autenticado pero SIN facility seleccionada, mostrar selector
@@ -132,7 +132,6 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
       <Suspense fallback={<PageLoader />}>
         <RouteErrorBoundary>
           <Switch>
-            {console.log('[Router/Switch] Inside Switch, location should be /facility/')}
             <Route path="/facility/" component={Dashboard} />
             <Route path="/facility/patients" component={PatientsPage} />
             <Route path="/facility/facility-report" component={FacilityWoundReport} />
@@ -157,13 +156,13 @@ function App() {
   const [isAuth, setIsAuth] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  
+
   // Clear auth data when new browser session starts (last tab was closed)
   useLogoutOnBrowserClose();
-  
+
   // Enforce only one tab of the application per browser
   const { isActiveTab, showBlockedMessage } = useSingleTabEnforcement();
-  
+
   console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized, 'isActiveTab:', isActiveTab);
 
   // Initialize auth state on mount
@@ -171,20 +170,20 @@ function App() {
     const updateAuthState = async () => {
       const authenticated = isAuthenticated();
       console.log("[App] updateAuthState called - isAuthenticated:", authenticated);
-      
+
       if (authenticated) {
         console.log("[App] User is authenticated, loading fresh user data...");
-        
+
         // Get basic auth info from localStorage first
         const authInfo = getAuthInfo();
         const email = authInfo.email;
-        
+
         if (email) {
           console.log("[App] Loading user data for:", email);
-          
+
           // Try to load fresh user data from API (similar to Flutter's loadUser)
           const loadUserSuccess = await loadUser(email);
-          
+
           if (loadUserSuccess) {
             console.log("[App] User data loaded successfully");
           } else {
@@ -192,7 +191,7 @@ function App() {
             // Don't clear auth - use cached data instead
             // This allows the app to work even if the API is temporarily unavailable
           }
-          
+
           // Try to load facilities (with or without fresh data)
           try {
             const facilities = await getFacilities();
@@ -201,11 +200,11 @@ function App() {
             console.log("[App] Failed to load facilities, continuing with cached:", error);
             // Continue anyway - use cached facilities if available
           }
-          
+
           // Get current auth info (fresh or cached)
           const currentAuthInfo = getAuthInfo();
           console.log("[App] Current auth info:", currentAuthInfo);
-          
+
           // Set auth state with current data (fresh or cached)
           if (currentAuthInfo.token && currentAuthInfo.email) {
             setIsAuth(true);
@@ -235,7 +234,7 @@ function App() {
         setUser(null);
         console.log("[App] Auth cleared");
       }
-      
+
       // Mark app as initialized
       setIsInitialized(true);
     };
@@ -294,7 +293,7 @@ function App() {
     } catch (error) {
       console.error("[App] Logout error:", error);
     }
-    
+
     console.log("[App] handleLogout() - manually setting state to logged out");
     // Clear local state - App will detect the change via logout event
     setIsAuth(false);
@@ -307,76 +306,76 @@ function App() {
       <ImportProvider>
         <TooltipProvider>
           <Toaster />
-        <ErrorBoundary>
-          {!isActiveTab && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.8)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 9999,
-              color: 'white',
-              fontFamily: 'Arial, sans-serif',
-            }}>
+          <ErrorBoundary>
+            {!isActiveTab && (
               <div style={{
-                textAlign: 'center',
-                padding: '40px',
-                backgroundColor: '#222',
-                borderRadius: '8px',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-                maxWidth: '400px',
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                color: 'white',
+                fontFamily: 'Arial, sans-serif',
               }}>
-                <h1 style={{ marginTop: 0, marginBottom: '20px', fontSize: '24px' }}>
-                  ⚠️ Another Tab Is Open
-                </h1>
-                <p style={{ marginBottom: '20px', fontSize: '16px', lineHeight: '1.5' }}>
-                  The application is already open in another tab of this browser.
-                </p>
-                <p style={{ marginBottom: '30px', fontSize: '14px', color: '#aaa' }}>
-                  Close the other tab and refresh this page to continue.
-                </p>
-                <button
-                  onClick={() => window.close()}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '14px',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Close This Tab
-                </button>
+                <div style={{
+                  textAlign: 'center',
+                  padding: '40px',
+                  backgroundColor: '#222',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                  maxWidth: '400px',
+                }}>
+                  <h1 style={{ marginTop: 0, marginBottom: '20px', fontSize: '24px' }}>
+                    ⚠️ Another Tab Is Open
+                  </h1>
+                  <p style={{ marginBottom: '20px', fontSize: '16px', lineHeight: '1.5' }}>
+                    The application is already open in another tab of this browser.
+                  </p>
+                  <p style={{ marginBottom: '30px', fontSize: '14px', color: '#aaa' }}>
+                    Close the other tab and refresh this page to continue.
+                  </p>
+                  <button
+                    onClick={() => window.close()}
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Close This Tab
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-          
-          {isActiveTab && (
-            <>
-              {isAuth && user ? (
-                <>
-                  {console.log('[App] Rendering Router with isAuth=true, user=', user.name)}
-                  <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
-                </>
-              ) : (
-                <>
-                  {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
-                  <Login onLogin={() => {
-                    console.log("[App] Login successful, waiting for auth state update...");
-                  }} />
-                </>
-              )}
-            </>
-          )}
-        </ErrorBoundary>
-      </TooltipProvider>    </ImportProvider>    </QueryClientProvider>
+            )}
+
+            {isActiveTab && (
+              <>
+                {isAuth && user ? (
+                  <>
+                    {console.log('[App] Rendering Router with isAuth=true, user=', user.name)}
+                    <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
+                  </>
+                ) : (
+                  <>
+                    {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
+                    <Login onLogin={() => {
+                      console.log("[App] Login successful, waiting for auth state update...");
+                    }} />
+                  </>
+                )}
+              </>
+            )}
+          </ErrorBoundary>
+        </TooltipProvider>    </ImportProvider>    </QueryClientProvider>
   );
 }
 

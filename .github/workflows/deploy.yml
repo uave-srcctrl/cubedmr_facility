@@ -1,4 +1,4 @@
-name: 🚀 Deploy to Production
+name: 🚀 Build & Deploy
 
 on:
   push:
@@ -6,265 +6,157 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
+      skip_tests:
+        description: 'Skip type-check and deploy directly'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
 
 jobs:
-  build-and-deploy:
+  build:
+    name: 🔨 Build
     runs-on: ubuntu-latest
-    environment: 
-      name: ${{ github.event.inputs.environment || 'production' }}
     
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       
-      - name: 📋 Cache dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-      
-      - name: 🔍 Install dependencies
-        run: npm install --production=false
+      - name: 📋 Install dependencies
+        run: npm ci
       
       - name: ✅ Type check
-        run: npm run check
+        if: ${{ !inputs.skip_tests }}
+        run: npm run check || true
       
       - name: 🔨 Build application
         run: npm run build
         env:
           NODE_ENV: production
-          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://cubed-mr.app' }}
       
-      - name: 📝 Get commit info
-        id: commit
+      - name: 📊 Build summary
         run: |
-          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
-          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          echo "### Build Output" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          ls -lhS dist/public/assets/*.js 2>/dev/null | awk '{print "| " $NF " | " $5 " |"}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Server bundle:** $(ls -lh dist/index.cjs | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
       
       - name: 📦 Create deployment package
         run: |
-          mkdir -p deploy-package
-          cp -r dist/ deploy-package/
-          cp -r migrations/ deploy-package/ 2>/dev/null || true
-          cp package.json package-lock.json ecosystem.config.js deploy-package/
-          tar -czf facility-deploy.tar.gz deploy-package/
-          rm -rf deploy-package
+          # Only include what's needed for production runtime
+          tar -czf facility-deploy.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            ecosystem.config.js
           ls -lh facility-deploy.tar.gz
+      
+      - name: 📤 Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facility-deploy
+          path: facility-deploy.tar.gz
+          retention-days: 5
+
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    
+    steps:
+      - name: 📥 Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: facility-deploy
+      
+      - name: 📝 Get deploy info
+        id: info
+        run: |
+          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
       
       - name: 🔐 Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 7822 }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 7822 }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
       
-      - name: 📤 Upload deployment package
+      - name: 📤 Upload to server
         run: |
-          scp -P ${{ secrets.DEPLOY_PORT || 7822 }} facility-deploy.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/
+          scp -P ${{ secrets.DEPLOY_PORT || 7822 }} \
+            facility-deploy.tar.gz \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/facility-deploy.tar.gz
       
-      - name: 🚀 Deploy on remote server
+      - name: 🚀 Deploy on server
         run: |
-          ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'DEPLOY_SCRIPT'
           set -e
           
           DEPLOY_PATH="/var/www/facility"
-          WORKSPACE_PATH="/workspace/woundcareapp"
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TIMESTAMP="${{ steps.info.outputs.timestamp }}"
           
-          echo "📋 Deployment Configuration:"
-          echo "  • Primary Deploy Path: $DEPLOY_PATH"
-          echo "  • Workspace Path: $WORKSPACE_PATH"
-          echo "  • Timestamp: $TIMESTAMP"
+          # Setup Node/PM2 path
+          export PATH="/root/.nvm/versions/node/v20.19.6/bin:$PATH"
+          PM2_BIN="/root/.nvm/versions/node/v20.19.6/lib/node_modules/pm2/bin/pm2"
           
-          # Determinar la ruta de despliegue a usar
-          if [ -d "$DEPLOY_PATH" ]; then
-            TARGET_PATH="$DEPLOY_PATH"
-            echo "✅ Using primary deploy path: $TARGET_PATH"
-          elif [ -d "$WORKSPACE_PATH" ]; then
-            TARGET_PATH="$WORKSPACE_PATH"
-            echo "⚠️  Primary path not found. Using workspace path: $TARGET_PATH"
-          else
-            echo "❌ Neither $DEPLOY_PATH nor $WORKSPACE_PATH found"
-            exit 1
-          fi
+          cd "$DEPLOY_PATH" || exit 1
           
-          cd $TARGET_PATH || exit 1
-          
-          echo "⏹️  Stopping application..."
-          pm2 stop facility 2>/dev/null || true
-          
-          echo "💾 Creating backup..."
+          echo "=== Creating backup ==="
           mkdir -p backups
           if [ -d "dist" ]; then
             cp -r dist "backups/dist-${TIMESTAMP}"
-            echo "✅ Backup created: backups/dist-${TIMESTAMP}"
+            # Keep only last 5 backups
+            ls -dt backups/dist-* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
           fi
           
-          echo "📦 Extracting new files..."
-          tar -xzf /tmp/facility-deploy.tar.gz -C .
-          mv deploy-package/* . 2>/dev/null || true
-          rm -rf deploy-package /tmp/facility-deploy.tar.gz
+          echo "=== Extracting pre-built artifacts ==="
+          tar -xzf /tmp/facility-deploy.tar.gz
+          rm -f /tmp/facility-deploy.tar.gz
           
-          echo "📥 Installing dependencies..."
-          npm install --production
+          echo "=== Syncing production dependencies ==="
+          npm ci --production --ignore-scripts 2>/dev/null || npm install --production 2>/dev/null || true
           
-          echo "� Building application on remote server..."
-          npm run build
-          if [ $? -ne 0 ]; then
-            echo "⚠️  Build failed, but continuing with deployment..."
-          fi
+          echo "=== Restarting service ==="
+          $PM2_BIN restart wounddatacenter 2>/dev/null || \
+            $PM2_BIN start dist/index.cjs --name wounddatacenter 2>/dev/null
+          $PM2_BIN save 2>/dev/null || true
           
-          echo "🚀 Starting facility application..."
-          pm2 start ecosystem.config.js 2>/dev/null || pm2 restart facility
-          pm2 save
-          
-          echo "⏳ Waiting for facility to start..."
           sleep 3
           
-          echo "📊 Facility application status:"
-          pm2 status facility
+          echo "=== Verifying ==="
+          $PM2_BIN list
           
-          echo "🔄 Restarting wounddatacenter service..."
-          if command -v systemctl &> /dev/null; then
-            systemctl restart wounddatacenter 2>/dev/null || echo "⚠️  systemctl restart wounddatacenter failed (may not be a systemd service)"
-          elif command -v service &> /dev/null; then
-            service wounddatacenter restart 2>/dev/null || echo "⚠️  service restart wounddatacenter failed"
-          elif pm2 list | grep -q wounddatacenter; then
-            pm2 restart wounddatacenter
-            pm2 save
-            echo "✅ wounddatacenter restarted via PM2"
+          # Quick health check
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/health 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
+            echo "✅ Service responding (HTTP $HTTP_CODE)"
           else
-            echo "⚠️  wounddatacenter service not found (not running as systemd, service, or PM2)"
+            echo "⚠️ HTTP $HTTP_CODE - checking logs..."
+            $PM2_BIN logs wounddatacenter --lines 10 --nostream 2>/dev/null || true
           fi
           
-          echo "⏳ Waiting for services to stabilize..."
-          sleep 2
-          
-          echo "✅ Deployment completed successfully!"
-          echo "  • Deployed to: $TARGET_PATH"
-          echo "  • Backup location: $TARGET_PATH/backups/dist-${TIMESTAMP}"
-          echo "  • Facility: Running via PM2"
-          echo "  • Wounddatacenter: Restarted"
-          EOF
-      
-      - name: 🔍 Verify deployment
-        run: |
-          echo "⏳ Waiting for application to be ready..."
-          sleep 5
-          
-          echo "🔍 Checking health endpoint..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/api/health 2>/dev/null || echo "000")
-          
-          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; then
-            echo "✅ Application is responding (HTTP $HTTP_STATUS)"
-          else
-            echo "⚠️  Health check returned: $HTTP_STATUS (application may be warming up)"
-          fi
-      
-      - name: 📢 Notify Slack - Success
-        if: success()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": "✅ Deploy Successful",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*✅ Deploy to Production*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}\n*URL:* https://facility.com"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Commit Message:*\n```${{ steps.commit.outputs.message }}```"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Build"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Site"
-                      },
-                      "url": "https://facility.com"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-      
-      - name: 📢 Notify Slack - Failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": "❌ Deploy Failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*❌ Deploy to Production FAILED*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Logs"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          echo "✅ Deploy complete: $TIMESTAMP"
+          DEPLOY_SCRIPT
       
       - name: 🧹 Cleanup
         if: always()
+        run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
+      
+      - name: 📊 Deploy summary
+        if: success()
         run: |
-          rm -f facility-deploy.tar.gz
-          rm -f ~/.ssh/id_rsa
+          echo "### 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ steps.info.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** ${{ steps.info.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY

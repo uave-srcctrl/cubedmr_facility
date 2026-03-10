@@ -1,10 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { registerRoutes } from "./routes/index";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import helmet from "helmet";
-import multer from "multer";
-import httpProxy from "http-proxy";
 
 const app = express();
 const httpServer = createServer(app);
@@ -82,17 +80,7 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-// Create HTTP proxy for Apache backend
-const proxy = httpProxy.createProxyServer({
-  target: 'http://localhost:80',
-  changeOrigin: true,
-  timeout: 30000,
-});
-
-// NOTE: /api/get is handled by routes.ts (see registerRoutes)
-// The proxy is only used for requests that are NOT handled by Express routes
-// Export proxy for use in routes if needed
-export { proxy };
+// NOTE: /api/get is handled by routes/ modules (see registerRoutes)
 
 // Middleware para manejar rutas de API con y sin prefijo /facility
 // Esto permite que Apache pueda enviar /facility/api/... y el servidor lo entienda como /api/...

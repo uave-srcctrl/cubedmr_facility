@@ -13,7 +13,8 @@ export function useReportDateRange() {
   const [endDate, setEndDateState] = useState<Date | undefined>(undefined);
 
   // Set start date with auto-swap if needed
-  const setStartDate = useCallback((date: Date) => {
+  const setStartDate = useCallback((date: Date | undefined) => {
+    if (!date) { setStartDateState(undefined); return; }
     if (endDate && date > endDate) {
       // Swap: new start becomes end, old end becomes start
       setStartDateState(endDate);
@@ -24,7 +25,8 @@ export function useReportDateRange() {
   }, [endDate]);
 
   // Set end date with auto-swap if needed
-  const setEndDate = useCallback((date: Date) => {
+  const setEndDate = useCallback((date: Date | undefined) => {
+    if (!date) { setEndDateState(undefined); return; }
     if (startDate && date < startDate) {
       // Swap: new end becomes start, old start becomes end
       setEndDateState(startDate);

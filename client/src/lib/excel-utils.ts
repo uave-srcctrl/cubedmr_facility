@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 // Soporta dos formatos de entrada:
 // Formato 1 (original): Nombres cortos/abreviados
 // Formato 2 (nuevo): Nombres descriptivos completos
-const COLUMN_MAPPING: Record<string, string> = {
+const COLUMN_MAPPING: Record<string, string | null> = {
   // Formato 1: Nombres cortos (compatibilidad hacia atrás)
   'Pt_Name': 'patient_id',
   'Pt Name': 'patient_id',
@@ -44,7 +44,7 @@ const COLUMN_MAPPING: Record<string, string> = {
   'Healing Velocity (cm²/Week)': 'healing_rate',
   'Healing Days': 'healing_days',
   'Healing Time Days': 'healing_days',
-  
+
   // Campos a ignorar
   'Helper Colum': null,
   'Helper Column': null
@@ -61,7 +61,7 @@ const COLUMN_MAPPING: Record<string, string> = {
  */
 function parseSize(sizeStr: string): { width: number | null; height: number | null; depth: number | null } | null {
   if (!sizeStr || typeof sizeStr !== 'string') return null;
-  
+
   // Intenta parsear formato: "5x4x2" o "5.2 x 4.8 x 1.5"
   const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
   if (match) {
@@ -71,7 +71,7 @@ function parseSize(sizeStr: string): { width: number | null; height: number | nu
       depth: parseFloat(match[3])
     };
   }
-  
+
   return null;
 }
 
@@ -101,18 +101,18 @@ export function remapExcelColumns(data: any[]): any[] {
 
   return data.map(row => {
     const newRow: Record<string, any> = {};
-    
+
     Object.entries(row).forEach(([key, value]) => {
       const newKey = keyMapping[key];
-      
+
       // Ignorar campos mapeados a vacío
       if (newKey === '') {
         return;
       }
-      
+
       // Transformación especial para "Size (Cm)"
       if (newKey === 'size') {
-        const sizeParsed = parseSize(value);
+        const sizeParsed = parseSize(String(value));
         if (sizeParsed) {
           newRow.width = sizeParsed.width;
           newRow.height = sizeParsed.height;
@@ -122,7 +122,7 @@ export function remapExcelColumns(data: any[]): any[] {
         newRow[newKey || key] = value;
       }
     });
-    
+
     return newRow;
   });
 }
@@ -319,7 +319,7 @@ export function validateExcelData(rawData: any[]): { isValid: boolean; errors: s
   // Remapear columnas de nombres amigables a nombres internos
   const data = remapExcelColumns(rawData);
   const errors: string[] = [];
-  
+
   // Campos requeridos (mínimos)
   const requiredFields = [
     'patient_id',

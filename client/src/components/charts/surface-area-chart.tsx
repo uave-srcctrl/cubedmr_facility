@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { toNum, ChartLineVisibility } from "@/lib/wound-utils";
 
 export interface SurfaceEncounter {
-  id?: string;
+  id?: string | number;
   dos: string;
   surface: number | string | null;
   healing_percentage?: number | string | null;

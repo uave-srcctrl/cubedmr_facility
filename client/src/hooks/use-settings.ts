@@ -103,10 +103,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
       id: 'dashboard', name: 'Dashboard', icon: '📊', enabled: true, category: 'reporting',
       components: [
         // KPI Cards Group - Master toggle with nested child cards
-        { 
-          id: 'kpi-cards', 
-          name: 'Summary Cards', 
-          enabled: true, 
+        {
+          id: 'kpi-cards',
+          name: 'Summary Cards',
+          enabled: true,
           description: 'Key performance indicator cards',
           children: [
             { id: 'card-active-wounds', name: 'Active Wounds', enabled: true, description: 'Shows total active wounds count' },
@@ -116,10 +116,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
           ]
         },
         // Charts Section - Master toggle with nested child charts
-        { 
-          id: 'charts-section', 
-          name: 'Charts', 
-          enabled: true, 
+        {
+          id: 'charts-section',
+          name: 'Charts',
+          enabled: true,
           description: 'Dashboard visualizations',
           children: [
             { id: 'chart-wound-etiology', name: 'Wound Etiology', enabled: true, description: 'Pie chart of wound types' },
@@ -133,10 +133,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     {
       id: 'patients', name: 'Patients', icon: '👥', enabled: true, category: 'reporting',
       components: [
-        { 
-          id: 'patient-kpi-cards', 
-          name: 'KPI Cards', 
-          enabled: true, 
+        {
+          id: 'patient-kpi-cards',
+          name: 'KPI Cards',
+          enabled: true,
           description: 'Patient metrics',
           children: [
             { id: 'card-total-patients', name: 'Total Patients', enabled: true, description: 'Shows total patients seen' },
@@ -151,10 +151,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     {
       id: 'round-summary', name: 'Woundcare Round Summary', icon: '📋', enabled: true, category: 'reporting',
       components: [
-        { 
-          id: 'summary-cards', 
-          name: 'Summary Cards', 
-          enabled: true, 
+        {
+          id: 'summary-cards',
+          name: 'Summary Cards',
+          enabled: true,
           description: 'Round metrics',
           children: [
             { id: 'card-total-wounds', name: 'Total Wounds', enabled: true, description: 'Shows total wounds in round' },
@@ -169,10 +169,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
       id: 'facility-report', name: 'Facility Wound Report', icon: '📋', enabled: true, category: 'reporting',
       components: [
         { id: 'filter-panel', name: 'Filter Panel', enabled: true, description: 'Search options' },
-        { 
-          id: 'kpi-cards', 
-          name: 'KPI Cards', 
-          enabled: true, 
+        {
+          id: 'kpi-cards',
+          name: 'KPI Cards',
+          enabled: true,
           description: 'Key performance indicators',
           children: [
             { id: 'card-avg-wound-reduction', name: 'Avg Wound Reduction', enabled: true, description: 'Monthly area reduction percentage' },
@@ -183,20 +183,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
             { id: 'card-chronic-wounds', name: 'Chronic Wounds', enabled: true, description: 'Shows wounds older than 100 days' },
           ]
         },
-        { 
-          id: 'chart-acuity-trend', 
-          name: 'Acuity Index Trend', 
-          enabled: true, 
+        {
+          id: 'chart-acuity-trend',
+          name: 'Acuity Index Trend',
+          enabled: true,
           description: 'Acuity index trend over time',
           children: [
             { id: 'acuity-trend-4weeks', name: '4 Weeks Back', enabled: true, description: 'Calculate 4 weeks back from end date' },
             { id: 'acuity-trend-daterange', name: 'Date Range', enabled: false, description: 'Use selected date picker interval' },
           ]
         },
-        { 
-          id: 'metrics-cards', 
-          name: 'Metrics Cards', 
-          enabled: true, 
+        {
+          id: 'metrics-cards',
+          name: 'Metrics Cards',
+          enabled: true,
           description: 'Detailed metrics tables',
           children: [
             { id: 'card-wound-activity', name: 'Wound Activity Metrics', enabled: true, description: 'New, resolved, active wounds stats' },
@@ -234,10 +234,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     {
       id: 'data-import', name: 'Data Import', icon: '📥', enabled: true, category: 'reporting',
       components: [
-        { 
-          id: 'format-selector', 
-          name: 'Format Selector', 
-          enabled: true, 
+        {
+          id: 'format-selector',
+          name: 'Format Selector',
+          enabled: true,
           description: 'Choose format',
           children: [
             { id: 'format-excel', name: 'Excel', enabled: true, description: 'XLSX, XLS spreadsheets' },
@@ -340,6 +340,7 @@ function migrateSettings(saved: Partial<AppSettings> | null): AppSettings {
   return {
     importFormats: saved.importFormats || DEFAULT_SETTINGS.importFormats,
     charts: saved.charts || DEFAULT_SETTINGS.charts,
+    visualizations: saved.visualizations || DEFAULT_SETTINGS.visualizations,
     pages: mergedPages,
     theme: saved.theme || DEFAULT_SETTINGS.theme,
     autoSave: saved.autoSave !== undefined ? saved.autoSave : DEFAULT_SETTINGS.autoSave,
@@ -382,18 +383,18 @@ function saveLocalSettings(settings: AppSettings): void {
 export function useSettings() {
   const { getToken, getEmail } = useAuth();
   const queryClient = useQueryClient();
-  
+
   const token = getToken();
   const email = getEmail();
-  
+
   // Get userId from secure storage (can be ProviderId or NurseId)
   // Settings are USER-based, not facility-based
   const userId = secureStorageSync.getItem("userEntityId");
-  
+
   const deviceId = localStorage.getItem("deviceId") || "web-settings";
 
   // ==================== FETCH SETTINGS FROM DB ====================
-  
+
   const { data: dbSettings, isLoading, error, refetch } = useQuery<AppSettings | null, Error>({
     queryKey: ["userSettings", userId],
     queryFn: async () => {
@@ -424,15 +425,15 @@ export function useSettings() {
         }
 
         const result = await response.json();
-        
+
         if (result.status && result.data) {
           // Settings found in DB
           const dbSettingsData = result.data.settings;
           const migrated = migrateSettings(dbSettingsData);
-          
+
           // Cache locally
           saveLocalSettings(migrated);
-          
+
           console.log('[useSettings] Loaded settings from DB');
           return migrated;
         } else {
@@ -451,12 +452,12 @@ export function useSettings() {
   });
 
   // ==================== CURRENT SETTINGS ====================
-  
+
   // Use DB settings if available, otherwise fall back to localStorage, then defaults
   const settings: AppSettings = dbSettings || getLocalSettings();
 
   // ==================== SAVE SETTINGS MUTATION ====================
-  
+
   const saveMutation = useMutation({
     mutationFn: async (newSettings: AppSettings) => {
       // Always save locally first (for immediate feedback)
@@ -489,7 +490,7 @@ export function useSettings() {
         }
 
         const result = await response.json();
-        
+
         if (result.status) {
           console.log('[useSettings] Settings saved to DB');
           return { success: true, local: false };
@@ -504,13 +505,13 @@ export function useSettings() {
     onMutate: async (newSettings) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: ["userSettings", userId] });
-      
+
       // Snapshot the previous value
       const previousSettings = queryClient.getQueryData(["userSettings", userId]);
-      
+
       // Optimistically update the cache immediately
       queryClient.setQueryData(["userSettings", userId], newSettings);
-      
+
       return { previousSettings };
     },
     onError: (err, newSettings, context) => {
@@ -555,13 +556,13 @@ export function useSettings() {
   const isComponentEnabled = useCallback((pageId: string, componentId: string): boolean => {
     const page = settings.pages.find(p => p.id === pageId);
     if (!page?.enabled) return false;
-    
+
     // First check if it's a direct component
     const directComponent = page.components?.find(c => c.id === componentId);
     if (directComponent) {
       return directComponent.enabled;
     }
-    
+
     // Check if it's a child component
     for (const component of page.components || []) {
       if (component.children) {
@@ -572,7 +573,7 @@ export function useSettings() {
         }
       }
     }
-    
+
     // Default to true if not found
     return true;
   }, [settings.pages]);
@@ -613,12 +614,12 @@ export function useSettings() {
     isLoading,
     error,
     isSaving: saveMutation.isPending,
-    
+
     // Actions
     saveSettings,
     resetSettings,
     refetch,
-    
+
     // Helpers
     isPageEnabled,
     isComponentEnabled,
@@ -626,7 +627,7 @@ export function useSettings() {
     isImportFormatEnabled,
     getEnabledPages,
     getEnabledImportFormats,
-    
+
     // Constants
     DEFAULT_SETTINGS,
   };

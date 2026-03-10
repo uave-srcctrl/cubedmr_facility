@@ -6,3 +6,15 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Logs
+logs/
+server-login.log
+nohup.out
+
+# Backups
+*.bak
+*.backup
+
+# Environment
+.env

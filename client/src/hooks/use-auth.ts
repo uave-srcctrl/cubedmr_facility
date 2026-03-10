@@ -178,15 +178,16 @@ export function useAuth() {
       // PHI logging removed for HIPAA compliance
 
       if (token && email) {
-        // Sending logout request to server
-        const response = await fetch(LOCAL_API.LOGOUT, {
+        // Send logout request directly to PHP API
+        const response = await fetch(LOCAL_API.LOGIN, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
           },
           body: JSON.stringify({
+            entity: "TryLogoutFacilities",
             email,
+            deviceId: "web-client",
             facility_id: facilityId,
           }),
         });

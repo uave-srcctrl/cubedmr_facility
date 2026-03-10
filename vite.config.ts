@@ -45,7 +45,7 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000, // Increase limit to 1MB (default is 500KB)
-    minify: 'esbuild',
+    minify: false, // Use 'esbuild' for CI/CD builds; false for low-memory local builds
     rollupOptions: {
       output: {
         // Let Rollup handle chunk splitting automatically to avoid circular dependencies

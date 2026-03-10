@@ -9,15 +9,13 @@ import {
   LineChart, Line
 } from "recharts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  dashboardKPIs as mockDashboardKPIs
-} from "@/lib/mockData";
 import { ArrowUpRight, Activity, Users, FileText, AlertCircle, Loader2, Calendar as CalendarIcon, RefreshCcw } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useEnabledDates } from "@/hooks/use-enabled-dates";
 import { useCriticalCases, useReportsGenerated, useWoundsByEtiology, useWoundsByHealingStatus, useWoundsByDisposition } from "@/hooks/use-patients";
 import { useSettings } from "@/hooks/use-settings";
-import { LOCAL_API } from "@/lib/api-config";
+import { fetchWithDateFallback, fetchFromPhpApi } from "@/lib/date-fallback";
+import { transformToKPIsFormat, transformToEtiologyFormat, transformToHealingStatusFormat, transformWoundReductionMedian, transformToWoundsByStatusFormat } from "@/lib/transforms";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { NoDataComponent } from "@/components/no-data-component-card";
 import { NoFacilityData } from "@/components/no-facility-data";
@@ -310,14 +308,12 @@ export default function Dashboard() {
     console.log('[Dashboard] lastDateValue type:', typeof lastDateValue, 'value:', lastDateValue);
 
     let computedLastDate: Date;
-    if (lastDateValue instanceof Date) {
-      computedLastDate = lastDateValue;
-    } else if (typeof lastDateValue === 'string') {
+    if (typeof lastDateValue === 'string') {
       const [year, month, day] = lastDateValue.split('-').map(Number);
       if (!year || !month || !day) return;
       computedLastDate = new Date(year, month - 1, day);
     } else {
-      computedLastDate = new Date(lastDateValue);
+      computedLastDate = new Date(lastDateValue as any);
     }
 
     if (isNaN(computedLastDate.getTime())) return;
@@ -367,37 +363,60 @@ export default function Dashboard() {
           return;
         }
 
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "X-Facility-Id": facilityId,
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-          console.log('[Dashboard/KPIs] Including Authorization header');
-        } else {
-          console.warn('[Dashboard/KPIs] ⚠️ NO TOKEN AVAILABLE!');
-        }
-
         console.log('[Dashboard/KPIs] Fetching with selectedFacilityId:', facilityId, 'dates:', startDateStr, '-', endDateStr);
-        const kpiUrl = `${LOCAL_API.DASHBOARD_KPIS}?startDate=${startDateStr}&endDate=${endDateStr}`;
-        const response = await fetch(kpiUrl, {
-          method: "GET",
-          headers
+
+        // Fetch KPIs via PHP API with date fallback (tries wider ranges if no data)
+        const result = await fetchWithDateFallback({
+          method: "rptFacilityWoundOutcome",
+          facilityId,
+          token,
+          email: authInfo.email || "dashboard-system",
+          deviceId: "dashboard-kpis",
+          startDate: startDateStr,
+          endDate: endDateStr,
+          validate: (d) => d.status && d.data?.length > 0 && d.data[0]["Number of Active Wounds"] > 0,
         });
 
-        // Check if response is ok before parsing JSON
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+        let backendData = result.data;
+
+        // Fallback to acuity index
+        if (!backendData) {
+          const acuity = await fetchFromPhpApi("rptFacilityAcuityIndex", {
+            facilityId, email: authInfo.email || "dashboard-system", token, deviceId: "dashboard-kpis-fallback",
+          });
+          if (acuity?.status && acuity.data?.length > 0) {
+            backendData = acuity;
+          }
         }
 
-        const result = await response.json();
+        if (!backendData) {
+          setDashboardKPIs(null);
+          setKpisSource('no-data');
+          setKpisError('No KPI data available');
+          setLoading(false);
+          return;
+        }
 
-        if (response.ok && result.status && result.data) {
-          setDashboardKPIs(result.data);
+        const kpisData = transformToKPIsFormat(backendData);
+
+        // Try to fetch reports generated count
+        try {
+          const reportsCount = await fetchFromPhpApi("getReportsGeneratedCount", {
+            email: authInfo.email, facilityId, token, deviceId: "dashboard-kpis-reports",
+            dosStart: startDateStr || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            dosEnd: endDateStr || new Date().toISOString().split('T')[0],
+          });
+          if (reportsCount?.status && reportsCount.data) {
+            kpisData.data.reportsGenerated.value = reportsCount.data.reports_generated;
+            kpisData.data.reportsGenerated.period = "In selected date range";
+          }
+        } catch { /* use calculated value */ }
+
+        if (kpisData.status && kpisData.data) {
+          setDashboardKPIs(kpisData.data);
           setKpisSource('backend');
           setKpisError(null);
         } else {
-          console.warn('[Dashboard] Backend returned no data');
           setDashboardKPIs(null);
           setKpisSource('no-data');
           setKpisError('No KPI data available');
@@ -427,30 +446,26 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!selectedFacilityId) return [];
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Facility-Id": selectedFacilityId,
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+      // Fetch etiology distribution directly from PHP API
+      const result = await fetchFromPhpApi("rptEtiologyDistribution", {
+        facilityId: selectedFacilityId,
+        dosStart: startDateStr,
+        dosEnd: endDateStr,
+        email: authInfo.email || "dashboard-etiology",
+        token,
+        deviceId: "dashboard-etiology",
+      });
 
-      const etiologyUrl = `${LOCAL_API.DASHBOARD_WOUND_ETIOLOGY}?startDate=${startDateStr}&endDate=${endDateStr}`;
-      const response = await fetch(etiologyUrl, { method: "GET", headers });
-
-      if (!response.ok) {
-        setEtiologySource('no-data');
-        return [];
-      }
-
-      const result = await response.json();
-      if (result.status && Array.isArray(result.data) && result.data.length > 0) {
-        setEtiologySource('backend');
-        // Normalize etiology names for consistent display
-        return result.data.map((item: { name: string; value: number; fill: string }) => ({
-          ...item,
-          name: normalizeEtiology(item.name)
-        }));
+      if (result?.status && result.data?.length > 0) {
+        const transformed = transformToEtiologyFormat(result);
+        if (transformed.status && Array.isArray(transformed.data) && transformed.data.length > 0) {
+          setEtiologySource('backend');
+          // Normalize etiology names for consistent display
+          return transformed.data.map((item: { name: string; value: number; fill: string; stroke?: string }) => ({
+            ...item,
+            name: normalizeEtiology(item.name)
+          }));
+        }
       }
       setEtiologySource('no-data');
       return [];
@@ -488,26 +503,20 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!selectedFacilityId) return null;
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Facility-Id": selectedFacilityId,
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+      // Fetch wound reduction median directly from PHP API
+      const result = await fetchFromPhpApi("woundReductionMedian", {
+        facilityId: selectedFacilityId,
+        dosStart: startDateStr,
+        dosEnd: endDateStr,
+        email: authInfo.email || "dashboard-system",
+        token,
+        deviceId: "dashboard-wound-reduction-median",
+      });
 
-      const reductionUrl = `${LOCAL_API.DASHBOARD_WOUND_REDUCTION_MEDIAN}?startDate=${startDateStr}&endDate=${endDateStr}`;
-      const response = await fetch(reductionUrl, { method: "GET", headers });
-
-      if (!response.ok) {
-        setReductionSource('no-data');
-        return null;
-      }
-
-      const result = await response.json();
-      if (result.status && result.data) {
+      if (result?.status && result.data?.length > 0) {
+        const transformed = transformWoundReductionMedian(result.data);
         setReductionSource('backend');
-        return result.data as WoundReductionMedianData;
+        return transformed as WoundReductionMedianData;
       }
       setReductionSource('no-data');
       return null;
@@ -526,27 +535,39 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!selectedFacilityId) return [];
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Facility-Id": selectedFacilityId,
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+      // Fetch healing status directly from PHP API
+      const healingResult = await fetchFromPhpApi("rptWoundHealingStatus", {
+        facilityId: selectedFacilityId,
+        dosStart: startDateStr,
+        dosEnd: endDateStr,
+        email: authInfo.email || "dashboard-system",
+        token,
+        deviceId: "dashboard-healing-status",
+      });
+
+      if (healingResult?.status && healingResult.data?.length > 0) {
+        const transformed = transformToHealingStatusFormat(healingResult);
+        if (transformed.status && Array.isArray(transformed.data) && transformed.data.length > 0) {
+          setHealingStatusSource('backend');
+          return transformed.data;
+        }
       }
 
-      const healingStatusUrl = `${LOCAL_API.DASHBOARD_HEALING_STATUS}?startDate=${startDateStr}&endDate=${endDateStr}`;
-      const response = await fetch(healingStatusUrl, { method: "GET", headers });
-
-      if (!response.ok) {
-        setHealingStatusSource('no-data');
-        return [];
+      // Fallback to acuity index
+      const acuity = await fetchFromPhpApi("rptFacilityAcuityIndex", {
+        facilityId: selectedFacilityId,
+        email: authInfo.email || "dashboard-system",
+        token,
+        deviceId: "dashboard-healing-fallback",
+      });
+      if (acuity?.status && acuity.data?.length > 0) {
+        const transformed = transformToHealingStatusFormat(acuity);
+        if (transformed.status && Array.isArray(transformed.data) && transformed.data.length > 0) {
+          setHealingStatusSource('backend');
+          return transformed.data;
+        }
       }
 
-      const result = await response.json();
-      if (result.status && Array.isArray(result.data) && result.data.length > 0) {
-        setHealingStatusSource('backend');
-        return result.data;
-      }
       setHealingStatusSource('no-data');
       return [];
     },
@@ -579,55 +600,36 @@ export default function Dashboard() {
           return;
         }
 
-        // Use the new /api/report endpoint to fetch rptWoundsByStatus
-        console.log('[Dashboard] Fetching wounds by status using /api/report endpoint for facility:', facilityId);
+        // Fetch wounds by status directly from PHP API
+        console.log('[Dashboard] Fetching wounds by status for facility:', facilityId);
 
-        const reportHeaders: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'X-Facility-Id': facilityId,
-        };
-        if (token) {
-          reportHeaders['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await fetch(LOCAL_API.REPORT, {
-          method: 'POST',
-          headers: reportHeaders,
-          body: JSON.stringify({
-            entity: 'Report',
-            reportName: 'rptWoundsByStatus',
-            facilityId: facilityId,
-            status: 'Active',
-            email: authInfo.email,
-            token: authInfo.token,
-            startDate: startDateStr,
-            endDate: endDateStr,
-          }),
+        const result = await fetchFromPhpApi("rptWoundsByStatus", {
+          facilityId: facilityId,
+          status: 'Active',
+          dosStart: startDateStr,
+          dosEnd: endDateStr,
+          email: authInfo.email || "dashboard-system",
+          token: authInfo.token,
+          deviceId: "dashboard-wounds-by-status",
         });
 
-        // Check if response is ok before parsing JSON
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        console.log('[Dashboard] Wounds by status result:', result);
 
-        const result = await response.json();
-        console.log('[Dashboard] Report API response:', result);
-        console.log('[Dashboard] Response status:', result.status);
-        console.log('[Dashboard] Response data:', result.data);
-        console.log('[Dashboard] Data is array?', Array.isArray(result.data));
-        console.log('[Dashboard] Data length:', result.data?.length);
-
-        if (result.status && Array.isArray(result.data) && result.data.length > 0) {
-          console.log('[Dashboard] Loaded wounds by status data from report API:', result.data);
-          setWoundsByStatusDataState(result.data);
-          setWoundsByStatusSource('backend');
-        } else if (result.status === false) {
-          // Backend returned an error (e.g., authentication failed, server error)
-          console.log('[Dashboard] Backend error:', result.error);
+        if (result?.status && Array.isArray(result.data) && result.data.length > 0) {
+          const transformed = transformToWoundsByStatusFormat(result);
+          if (transformed.status && Array.isArray(transformed.data) && transformed.data.length > 0) {
+            console.log('[Dashboard] Loaded wounds by status data:', transformed.data);
+            setWoundsByStatusDataState(transformed.data);
+            setWoundsByStatusSource('backend');
+          } else {
+            setWoundsByStatusDataState([]);
+            setWoundsByStatusSource('no-data');
+          }
+        } else if (result?.status === false) {
+          console.log('[Dashboard] Backend error:', result?.error);
           setWoundsByStatusDataState([]);
           setWoundsByStatusSource('mock');
         } else {
-          // Backend returned success but with no data (empty array)
           console.log('[Dashboard] No wounds by status data available from backend');
           setWoundsByStatusDataState([]);
           setWoundsByStatusSource('no-data');

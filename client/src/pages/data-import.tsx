@@ -2112,7 +2112,7 @@ export default function DataImportPage() {
                   <div className="bg-red-50 dark:bg-red-950 p-3 rounded-lg border border-red-200 dark:border-red-800">
                     <p className="text-xs text-red-600 dark:text-red-400 mb-1">PDF Facilities</p>
                     <p className="font-semibold text-red-700 dark:text-red-300 text-sm">
-                      {[...new Set(pendingMismatchFiles.map(m => m.pdfFacilityName))].join(', ')}
+                      {Array.from(new Set(pendingMismatchFiles.map(m => m.pdfFacilityName))).join(', ')}
                     </p>
                   </div>
                   <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">

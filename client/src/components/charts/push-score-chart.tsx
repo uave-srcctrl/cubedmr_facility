@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { toNum } from "@/lib/wound-utils";
 
 export interface PushEncounter {
-  id?: string;
+  id?: string | number;
   dos: string;
   push_score: number | string | null;
 }
@@ -44,7 +44,7 @@ interface ChartDataPoint {
   pushScore: number;
   changeFromPrev: number;
   changeFromInitial: number;
-  id?: string;
+  id?: string | number;
 }
 
 const formatDate = (dateStr: string): string => {

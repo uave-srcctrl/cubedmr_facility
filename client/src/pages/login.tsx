@@ -65,7 +65,7 @@ export default function Login({ onLogin }: LoginProps) {
       // Facility login by email
       const email = values.identifier;
       const entity = "TryLogin";
-      
+
       // Generate a device ID if not already in localStorage
       let deviceId = localStorage.getItem("deviceId");
       if (!deviceId) {
@@ -74,7 +74,7 @@ export default function Login({ onLogin }: LoginProps) {
       }
 
       // Login flow initiated
-      
+
       // Replicate EXACT Dart flow:
       // Step 1: In authenticate(), Dart does: SHA256(password)
       let firstHash = await sha256(values.password);
@@ -88,7 +88,7 @@ export default function Login({ onLogin }: LoginProps) {
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
       const salt = `${email}38457487${deviceId}`;
       const encountertrackid = await sha256(salt);
-      
+
       const response = await fetch(LOCAL_API.LOGIN, {
         method: "POST",
         headers: {
@@ -111,7 +111,7 @@ export default function Login({ onLogin }: LoginProps) {
       // The backend returns: { status: true, data: [{ status: 1, token, entityId, entity, entityName, facilities, msg }] }
       // OR for already authenticated sessions: { status: false, data: [{ status: 0, facilityId, email, name, msg }] }
       const dataItem = data.data && data.data[0];
-      
+
       // Check if there's an active session (status: 0, reason: 1 = "Facility currently authenticated")
       // If the response includes a valid token, use it directly instead of retrying
       if (dataItem?.status === 0 && dataItem?.reason === 1) {
@@ -120,25 +120,25 @@ export default function Login({ onLogin }: LoginProps) {
           processLoginSuccess(dataItem, values.identifier);
           return;
         }
-        
+
         // Retry up to 3 times with different device IDs
         let retryCount = 0;
         const maxRetries = 3;
-        
+
         while (retryCount < maxRetries) {
           retryCount++;
-          
+
           // Generate a new device ID
           const newDeviceId = "web-" + Math.random().toString(36).substr(2, 9);
           localStorage.setItem("deviceId", newDeviceId);
-          
+
           // Recalculate hashes for new deviceId
           const newSalt = `${email}38457487${newDeviceId}`;
           const newEncountertrackid = await sha256(newSalt);
-          
+
           // Wait a bit before retrying
           await new Promise(resolve => setTimeout(resolve, 300));
-          
+
           const retryResponse = await fetch(LOCAL_API.LOGIN, {
             method: "POST",
             headers: {
@@ -153,12 +153,12 @@ export default function Login({ onLogin }: LoginProps) {
               encountertrackid: newEncountertrackid,
             }),
           });
-          
+
           const retryText = await retryResponse.text();
           const retryData = JSON.parse(retryText);
-          
+
           const retryItem = retryData.data && retryData.data[0];
-          
+
           // Check if we got "Too many attempts" - this means we hit rate limiting
           if (retryItem?.reason === 5) {
             toast({
@@ -168,15 +168,15 @@ export default function Login({ onLogin }: LoginProps) {
             });
             return;
           }
-          
+
           // Success if: 1) Normal login success, or 2) Already authenticated with a valid token
-          if ((retryData.status === true && retryItem?.status === 1) || 
-              (retryItem?.status === 0 && retryItem?.reason === 1 && retryItem?.token)) {
+          if ((retryData.status === true && retryItem?.status === 1) ||
+            (retryItem?.status === 0 && retryItem?.reason === 1 && retryItem?.token)) {
             processLoginSuccess(retryItem, values.identifier);
             return;
           }
         }
-        
+
         // All retries failed
         const retryItem = data.data && data.data[0];
         toast({
@@ -186,7 +186,7 @@ export default function Login({ onLogin }: LoginProps) {
         });
         return;
       }
-      
+
       // Check for rate limiting (reason: 5 = "Too many attempts in the last 5 minutes")
       if (dataItem?.status === 0 && dataItem?.reason === 5) {
         toast({
@@ -196,7 +196,7 @@ export default function Login({ onLogin }: LoginProps) {
         });
         return;
       }
-      
+
       // Also check for rate limiting by message content (in case reason field is different)
       if (dataItem?.msg && (dataItem.msg.toLowerCase().includes("too many") || dataItem.msg.toLowerCase().includes("demasiados"))) {
         console.log("[Login] Rate limiting detected from message:", dataItem?.msg);
@@ -207,10 +207,10 @@ export default function Login({ onLogin }: LoginProps) {
         });
         return;
       }
-      
-      const isSuccess = (data.status === true && dataItem?.status === 1) || 
-                        (dataItem?.facilityId && dataItem?.email && dataItem?.status === 1);
-      
+
+      const isSuccess = (data.status === true && dataItem?.status === 1) ||
+        (dataItem?.facilityId && dataItem?.email && dataItem?.status === 1);
+
       if (isSuccess && dataItem) {
         processLoginSuccess(dataItem, values.identifier);
       } else {
@@ -235,7 +235,7 @@ export default function Login({ onLogin }: LoginProps) {
 
   async function requestOneTimeCode() {
     const email = form.getValues("identifier");
-    
+
     if (!email || !email.includes("@")) {
       toast({
         title: "Email required",
@@ -259,7 +259,7 @@ export default function Login({ onLogin }: LoginProps) {
       });
 
       const data = await response.json();
-      
+
       if (data.status === true) {
         toast({
           title: "Code Sent",
@@ -288,18 +288,18 @@ export default function Login({ onLogin }: LoginProps) {
 
   function processLoginSuccess(dataItem: any, email: string) {
     console.log("[Login] Authentication successful!");
-    
+
     // Import useAuth functions including new Flutter-like functions
     const { setAuth, loadUser, getFacilities } = useAuth();
-    
+
     // Use facilityId or entityId (handle both response formats)
     const facilityId = String(dataItem.entityId || dataItem.facilityId);
     const facilityName = dataItem.entityName || dataItem.name || email.split('@')[0] || "Facility";
-    
+
     // Process facilities array
     const facilities = dataItem.facilities || [];
     console.log("[Login] Facilities received from login:", facilities.length > 0 ? facilities : "none");
-    
+
     // Store initial auth info using setAuth
     setAuth(
       dataItem.token || "",
@@ -310,95 +310,95 @@ export default function Login({ onLogin }: LoginProps) {
       facilityId && facilityId !== "undefined" ? facilityId : null,
       facilities.length > 0 ? facilities : []
     );
-    
+
     // Auth info stored, proceeding with user data loading
-    
+
     // Flutter-like flow: Load complete user data and facilities
     loadUserDataAndFacilities(email);
   }
 
   async function loadUserDataAndFacilities(email: string) {
     console.log("[Login] Starting user data loading...");
-    
+
     try {
       // Step 1: Load user data (EntityInfo + Groups) first - this populates userEntityId (ProviderId)
       const { loadUser, getFacilities, getAuthInfo, setSelectedFacility, isFacilitySelected } = useAuth();
-      
+
       console.log("[Login] Step 1: Loading user data (EntityInfo + Groups)...");
       const loadUserSuccess = await loadUser(email);
-      
+
       if (!loadUserSuccess) {
         console.warn("[Login] Failed to load user data, but continuing with cached data");
       } else {
         console.log("[Login] User data loaded successfully");
       }
-      
+
       // Step 2: Get fresh facilities from server (now with ProviderId available)
       console.log("[Login] Step 2: Fetching facilities from server...");
       const facilities = await getFacilities();
       console.log("[Login] Facilities loaded:", facilities.length, "facilities");
-      
+
       // Get current auth info to update
       const authInfo = getAuthInfo();
-      
+
       // Step 3: Check if user has only ONE facility
       if (facilities.length === 1) {
         console.log("[Login] Only one facility available, auto-selecting it...");
         const singleFacility = facilities[0];
-        
+
         // Auto-select the facility
         setSelectedFacility(singleFacility.id);
-        
+
         // Dispatch facility selected event
         dispatchAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, singleFacility.id);
-        
+
         // Show welcome message - use userName (ProviderName/NurseName) instead of entityName (entity type)
         const displayName = authInfo.userName || authInfo.entityName || email.split('@')[0] || "User";
         toast({
           title: `Welcome, ${displayName}!`,
           description: `Automatically logged into ${singleFacility.name || singleFacility.id}`,
         });
-        
+
         // Call onLogin callback (which navigates to /facility/)
         onLogin();
-        
+
         console.log("[Login] Single facility auto-selected, navigating to dashboard...");
         return;
       }
-      
+
       // Step 4: Multiple facilities - show selector
       console.log("[Login] Multiple facilities available, user will select from FacilitySelectorPage");
-      
+
       // Dispatch login event with complete information
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
         email: email,
         facilitiesLoaded: true,
         facilitiesCount: facilities.length,
       });
-      
+
       // Call onLogin callback
       onLogin();
-      
+
       // Show welcome message - use userName (ProviderName/NurseName) instead of entityName (entity type)
       const displayName = authInfo.userName || authInfo.entityName || email.split('@')[0] || "User";
       toast({
         title: `Welcome, ${displayName}!`,
         description: `You have successfully logged in. Please select a facility.`,
       });
-      
+
     } catch (error) {
       console.error("[Login] Error in user data loading:", error);
-      
+
       // Still proceed even if facilities loading failed
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
         email: email,
         facilitiesLoaded: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
       });
-      
+
       // Call onLogin callback even on error
       onLogin();
-      
+
       toast({
         title: "Login successful",
         description: "You have successfully logged in.",
@@ -468,9 +468,9 @@ export default function Login({ onLogin }: LoginProps) {
                   </div>
                 )}
               </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 className="w-full mt-2 font-medium"
                 disabled={isLoading || isSendingOTC}
                 onClick={requestOneTimeCode}

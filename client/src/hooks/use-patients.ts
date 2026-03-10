@@ -773,4 +773,4 @@ export function useWoundsByDisposition(facilityId: string | null, disposition: s
   });
 }
 
-export type { FacilityPatient, WoundEncounter, PatientByDate, CriticalWound, CriticalPatient, CriticalCasesResponse, UpdateWoundEncounterParams, ReportEncounter, ReportPatient, ReportsGeneratedResponse, WoundsByEtiologyResponse, WoundsByHealingStatusResponse, WoundsByDispositionResponse };
+export type { FacilityPatient, WoundEncounter, PatientByDate, CriticalWound, CriticalPatient, CriticalCasesResponse, UpdateWoundEncounterParams, ReportEncounter, ReportPatient, ReportsGeneratedResponse };
