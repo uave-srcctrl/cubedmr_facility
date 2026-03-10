@@ -36,6 +36,8 @@ jobs:
       - name: Install & Build
         run: |
           npm ci
+          ${{ !inputs.skip_tests && 'npx tsc --noEmit' || 'echo "Skipping type-check"' }}
+          ${{ !inputs.skip_tests && 'npx vitest run' || 'echo "Skipping tests"' }}
           npx vite build
         env:
           NODE_ENV: production
@@ -97,9 +99,37 @@ jobs:
         run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
 
   # ─── PHP API Deploy ────────────────────────────────────────────
+  test-api:
+    name: 🧪 Test PHP API
+    if: ${{ inputs.deploy_api && !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout API repo
+        uses: actions/checkout@v4
+        with:
+          repository: Utility-Avenue/woundcare-api
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: mbstring, xml, curl, json
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: 🧹 PHP Lint
+        run: find . -name '*.php' -not -path './vendor/*' -not -path './tests/*' | xargs -n1 php -l
+
+      - name: 🧪 Run Tests
+        run: ./vendor/bin/phpunit --testsuite Unit --testsuite Regression --testsuite Security
+
   deploy-api:
     name: 🚀 Deploy PHP API
     if: ${{ inputs.deploy_api }}
+    needs: [test-api]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -190,7 +220,7 @@ jobs:
   summary:
     name: 📊 Deploy Summary
     runs-on: ubuntu-latest
-    needs: [deploy-react, deploy-api]
+    needs: [deploy-react, deploy-api, test-api]
     if: always()
     steps:
       - name: Generate summary

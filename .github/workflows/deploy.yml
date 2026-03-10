@@ -37,7 +37,11 @@ jobs:
       
       - name: ✅ Type check
         if: ${{ !inputs.skip_tests }}
-        run: npx tsc --noEmit || true
+        run: npx tsc --noEmit
+      
+      - name: 🧪 Run tests
+        if: ${{ !inputs.skip_tests }}
+        run: npx vitest run
       
       - name: 🔨 Build application
         run: npx vite build
