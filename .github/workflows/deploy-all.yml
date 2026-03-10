@@ -83,7 +83,7 @@ jobs:
 
           ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
           set -e
-          cd /var/www/facility
+          cd /var/www/stage/wounddatacenter
           mkdir -p backups
           [ -d "dist/public" ] && tar -czf "backups/spa-$(date +%Y%m%d%H%M%S).tar.gz" dist/public/
           ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
@@ -178,7 +178,7 @@ jobs:
 
           ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
           set -e
-          API_PATH="/var/www/prod/api"
+          API_PATH="/var/www/stage/api"
           cd "$API_PATH"
 
           # Backup

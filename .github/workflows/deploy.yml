@@ -105,7 +105,7 @@ jobs:
           ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'DEPLOY_SCRIPT'
           set -e
           
-          DEPLOY_PATH="/var/www/facility"
+          DEPLOY_PATH="/var/www/stage/wounddatacenter"
           SPA_PATH="$DEPLOY_PATH/dist/public"
           TIMESTAMP="${{ steps.info.outputs.timestamp }}"
           
