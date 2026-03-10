@@ -201,12 +201,6 @@ jobs:
           chmod 644 *.php .htaccess 2>/dev/null || true
           chmod 640 config.php .env 2>/dev/null || true
 
-          # Sync to /var/www/html/api/
-          echo "=== Syncing to html/api ==="
-          rsync -a --exclude='.git' --exclude='.env' --exclude='config.php' \
-            --exclude='vendor' --exclude='copilot-analysis' --exclude='backups' \
-            "$API_PATH/" /var/www/html/api/
-
           # Verify
           HTTP=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/api/ 2>/dev/null)
           echo "✅ PHP API deployed (HTTP $HTTP)"
