@@ -113,10 +113,13 @@ const initialFormState: EditFormState = {
   facilityAcquired: false,
 };
 
-// Helper to parse string values to numbers
+// Helper to parse string values to numbers, safely handling NaN
 const toNum = (val: unknown): number => {
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') return parseFloat(val) || 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (typeof val === 'string') {
+    const n = parseFloat(val);
+    return isNaN(n) ? 0 : n;
+  }
   return 0;
 };
 
@@ -189,18 +192,29 @@ export function WoundEditModal({
 
   const handleSave = async () => {
     if (!wound) return;
-    
+
+    // Validate encounterId is not NaN or empty
+    const encounterId = String(wound.id);
+    if (!encounterId || encounterId === 'NaN' || encounterId === 'undefined' || encounterId === 'null' || encounterId === '0') {
+      toast({
+        variant: "destructive",
+        title: "Invalid Encounter",
+        description: "Cannot save: this wound encounter has an invalid ID. Please refresh and try again.",
+      });
+      return;
+    }
+
     try {
       await updateMutation.mutateAsync({
         facilityId,
         patientId: String(wound.patient_id),
-        encounterId: String(wound.id),
+        encounterId,
         location: editForm.location || undefined,
         etiology: editForm.etiology || undefined,
         startDate: editForm.startDate || undefined,
-        width: parseFloat(editForm.width) || undefined,
-        height: parseFloat(editForm.height) || undefined,
-        depth: parseFloat(editForm.depth) || undefined,
+        width: isNaN(parseFloat(editForm.width)) ? undefined : parseFloat(editForm.width),
+        height: isNaN(parseFloat(editForm.height)) ? undefined : parseFloat(editForm.height),
+        depth: isNaN(parseFloat(editForm.depth)) ? undefined : parseFloat(editForm.depth),
         exudate: editForm.exudate || undefined,
         tissue: editForm.tissue || undefined,
         treatment: editForm.treatment || undefined,
@@ -212,7 +226,7 @@ export function WoundEditModal({
         palliative: editForm.palliative,
         facilityAcquired: editForm.facilityAcquired,
       });
-      
+
       // Refetch all wound-related queries to ensure UI updates
       await Promise.all([
         queryClient.refetchQueries({ queryKey: ["patientDetail", facilityId, String(wound.patient_id)] }),
@@ -234,7 +248,7 @@ export function WoundEditModal({
         queryClient.refetchQueries({ queryKey: ["facilityAcuityIndexRange"] }),
         queryClient.refetchQueries({ queryKey: ["woundEncountersPushScore"] }),
       ]);
-      
+
       toast({
         title: "Wound Updated",
         description: "The wound encounter has been saved successfully.",
@@ -273,7 +287,7 @@ export function WoundEditModal({
             )}
           </DialogDescription>
         </DialogHeader>
-          
+
         <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
           {/* Location, Etiology & Start Date */}
           <div className="grid grid-cols-3 gap-3">
@@ -342,7 +356,7 @@ export function WoundEditModal({
                 </PopoverTrigger>
                 <PopoverContent className="w-[288px] p-0 z-[300]" align="start">
                   <div className="p-3 border-b bg-muted/50 text-xs text-muted-foreground">
-                    {maxStartDate 
+                    {maxStartDate
                       ? `Dates up to ${format(maxStartDate, 'PPP')} available`
                       : 'Select wound start date'
                     }
@@ -397,7 +411,7 @@ export function WoundEditModal({
               />
             </div>
           </div>
-          
+
           {/* Tissue & Exudate */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -430,7 +444,7 @@ export function WoundEditModal({
               </Select>
             </div>
           </div>
-          
+
           {/* Treatment & Progress */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -461,7 +475,7 @@ export function WoundEditModal({
               </Select>
             </div>
           </div>
-          
+
           {/* Frequency & Disposition */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -579,7 +593,7 @@ export function WoundEditModal({
             </div>
           </div>
         </div>
-        
+
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={updateMutation.isPending}>
             <X className="h-4 w-4 mr-1" />

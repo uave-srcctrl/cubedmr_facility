@@ -7,8 +7,11 @@
  * Safely parse unknown values to numbers
  */
 export const toNum = (val: unknown): number => {
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') return parseFloat(val) || 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (typeof val === 'string') {
+    const n = parseFloat(val);
+    return isNaN(n) ? 0 : n;
+  }
   return 0;
 };
 
@@ -87,12 +90,12 @@ export const getProgressBackground = (progress: string): StatusStyle => {
 export const getWoundCardBackground = (progress: string, disposition?: string): string => {
   const p = progress?.toLowerCase() || "";
   const d = disposition?.toLowerCase() || "";
-  
+
   // Check disposition first for resolved/healed (if provided)
   if (d.includes("resolved") || d.includes("healed") || d.includes("closed")) {
     return "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
   }
-  
+
   // Resolved/Healed/Closed in progress
   if (p.includes("resolved") || p.includes("healed") || p.includes("closed")) {
     return "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
