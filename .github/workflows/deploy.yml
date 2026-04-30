@@ -1,4 +1,4 @@
-name: Deploy CubedMR_Facility (Flutter Web)
+name: Deploy CubedMR_Facility (React App)
 
 on:
   push:
