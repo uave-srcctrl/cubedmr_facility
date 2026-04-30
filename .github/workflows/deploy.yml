@@ -1,270 +1,70 @@
-name: 🚀 Deploy to Production
+name: Deploy CubedMR_Facility (React App)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, stage ]
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deployment environment'
+        description: 'Target environment'
         required: true
-        default: 'production'
+        default: 'staging'
         type: choice
         options:
-          - production
           - staging
-
+          - production
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    environment: 
-      name: ${{ github.event.inputs.environment || 'production' }}
-    
+
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: Deploying to Server
+        uses: appleboy/ssh-action@master
         with:
-          fetch-depth: 0
-      
-      - name: 📦 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      
-      - name: 📋 Cache dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-      
-      - name: 🔍 Install dependencies
-        run: npm install --production=false
-      
-      - name: ✅ Type check
-        run: npm run check
-      
-      - name: 🔨 Build application
-        run: npm run build
-        env:
-          NODE_ENV: production
-          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://cubed-mr.app' }}
-      
-      - name: 📝 Get commit info
-        id: commit
-        run: |
-          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
-          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
-      
-      - name: 📦 Create deployment package
-        run: |
-          mkdir -p deploy-package
-          cp -r dist/ deploy-package/
-          cp -r migrations/ deploy-package/ 2>/dev/null || true
-          cp package.json package-lock.json ecosystem.config.js deploy-package/
-          tar -czf facility-deploy.tar.gz deploy-package/
-          rm -rf deploy-package
-          ls -lh facility-deploy.tar.gz
-      
-      - name: 🔐 Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 7822 }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-      
-      - name: 📤 Upload deployment package
-        run: |
-          scp -P ${{ secrets.DEPLOY_PORT || 7822 }} facility-deploy.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/
-      
-      - name: 🚀 Deploy on remote server
-        run: |
-          ssh -p ${{ secrets.DEPLOY_PORT || 7822 }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
-          set -e
+          host: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_HOST || secrets.STAGING_SSH_HOST }}
+          port: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_PORT || secrets.STAGING_SSH_PORT }}
+          username: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_USER || secrets.STAGING_SSH_USER }}
+          key: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_PRIVATE_KEY || secrets.STAGING_SSH_PRIVATE_KEY }}
           
-          DEPLOY_PATH="/var/www/facility"
-          WORKSPACE_PATH="/workspace/woundcareapp"
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          
-          echo "📋 Deployment Configuration:"
-          echo "  • Primary Deploy Path: $DEPLOY_PATH"
-          echo "  • Workspace Path: $WORKSPACE_PATH"
-          echo "  • Timestamp: $TIMESTAMP"
-          
-          # Determinar la ruta de despliegue a usar
-          if [ -d "$DEPLOY_PATH" ]; then
-            TARGET_PATH="$DEPLOY_PATH"
-            echo "✅ Using primary deploy path: $TARGET_PATH"
-          elif [ -d "$WORKSPACE_PATH" ]; then
-            TARGET_PATH="$WORKSPACE_PATH"
-            echo "⚠️  Primary path not found. Using workspace path: $TARGET_PATH"
-          else
-            echo "❌ Neither $DEPLOY_PATH nor $WORKSPACE_PATH found"
-            exit 1
-          fi
-          
-          cd $TARGET_PATH || exit 1
-          
-          echo "⏹️  Stopping application..."
-          pm2 stop facility 2>/dev/null || true
-          
-          echo "💾 Creating backup..."
-          mkdir -p backups
-          if [ -d "dist" ]; then
-            cp -r dist "backups/dist-${TIMESTAMP}"
-            echo "✅ Backup created: backups/dist-${TIMESTAMP}"
-          fi
-          
-          echo "📦 Extracting new files..."
-          tar -xzf /tmp/facility-deploy.tar.gz -C .
-          mv deploy-package/* . 2>/dev/null || true
-          rm -rf deploy-package /tmp/facility-deploy.tar.gz
-          
-          echo "📥 Installing dependencies..."
-          npm install --production
-          
-          echo "� Building application on remote server..."
-          npm run build
-          if [ $? -ne 0 ]; then
-            echo "⚠️  Build failed, but continuing with deployment..."
-          fi
-          
-          echo "🚀 Starting facility application..."
-          pm2 start ecosystem.config.js 2>/dev/null || pm2 restart facility
-          pm2 save
-          
-          echo "⏳ Waiting for facility to start..."
-          sleep 3
-          
-          echo "📊 Facility application status:"
-          pm2 status facility
-          
-          echo "🔄 Restarting wounddatacenter service..."
-          if command -v systemctl &> /dev/null; then
-            systemctl restart wounddatacenter 2>/dev/null || echo "⚠️  systemctl restart wounddatacenter failed (may not be a systemd service)"
-          elif command -v service &> /dev/null; then
-            service wounddatacenter restart 2>/dev/null || echo "⚠️  service restart wounddatacenter failed"
-          elif pm2 list | grep -q wounddatacenter; then
-            pm2 restart wounddatacenter
-            pm2 save
-            echo "✅ wounddatacenter restarted via PM2"
-          else
-            echo "⚠️  wounddatacenter service not found (not running as systemd, service, or PM2)"
-          fi
-          
-          echo "⏳ Waiting for services to stabilize..."
-          sleep 2
-          
-          echo "✅ Deployment completed successfully!"
-          echo "  • Deployed to: $TARGET_PATH"
-          echo "  • Backup location: $TARGET_PATH/backups/dist-${TIMESTAMP}"
-          echo "  • Facility: Running via PM2"
-          echo "  • Wounddatacenter: Restarted"
-          EOF
-      
-      - name: 🔍 Verify deployment
-        run: |
-          echo "⏳ Waiting for application to be ready..."
-          sleep 5
-          
-          echo "🔍 Checking health endpoint..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/api/health 2>/dev/null || echo "000")
-          
-          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; then
-            echo "✅ Application is responding (HTTP $HTTP_STATUS)"
-          else
-            echo "⚠️  Health check returned: $HTTP_STATUS (application may be warming up)"
-          fi
-      
-      - name: 📢 Notify Slack - Success
-        if: success()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": "✅ Deploy Successful",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*✅ Deploy to Production*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}\n*URL:* https://facility.com"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Commit Message:*\n```${{ steps.commit.outputs.message }}```"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Build"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Site"
-                      },
-                      "url": "https://facility.com"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-      
-      - name: 📢 Notify Slack - Failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": "❌ Deploy Failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*❌ Deploy to Production FAILED*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Author:* ${{ github.actor }}"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Logs"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-      
-      - name: 🧹 Cleanup
-        if: always()
-        run: |
-          rm -f facility-deploy.tar.gz
-          rm -f ~/.ssh/id_rsa
+          script: |
+            # Print CLI version info
+            echo "======= CLI Version Information ======="
+            ssh -V 2>&1 | head -1 || echo "OpenSSH available"
+            echo "======================================="
+            echo ""
+            
+            # Determine environment and set app path
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              SERVER_APP_PATH="${{ secrets.PROD_APP_PATH }}"
+              BASE_URL="${{ secrets.PROD_BASE_URL }}"
+              ENVIRONMENT="production"
+              echo "🚀 Deploying to PRODUCTION"
+            else
+              SERVER_APP_PATH="${{ secrets.STAGING_APP_PATH }}"
+              BASE_URL="${{ secrets.STAGING_BASE_URL }}"
+              ENVIRONMENT="staging"
+              echo "🟡 Deploying to STAGING"
+            fi
+
+            # Validate APP_PATH is not empty
+            if [ -z "$SERVER_APP_PATH" ]; then
+              echo "❌ ERROR: APP_PATH is empty or not configured"
+              echo "Check that ${{ github.ref == 'refs/heads/main' && 'PROD_APP_PATH' || 'STAGING_APP_PATH' }} secret is configured in GitHub"
+              exit 1
+            fi
+
+            echo "📦 Deploy path: $SERVER_APP_PATH"
+            echo "🔧 Environment: $ENVIRONMENT"
+            echo "📅 Deploy timestamp: $(date '+%Y%m%d-%H%M%S')"
+            echo ""
+
+            # Execute backend deploy script passing all parameters
+            export ENVIRONMENT="$ENVIRONMENT"
+            export SERVER_APP_PATH="$SERVER_APP_PATH"
+            export BASE_URL="$BASE_URL"
+            /home/deploy/deploy_cubedmr_facility.sh
