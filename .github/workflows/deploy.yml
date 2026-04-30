@@ -17,9 +17,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    environment:
-      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
-
     steps:
       - uses: actions/checkout@v5
 
