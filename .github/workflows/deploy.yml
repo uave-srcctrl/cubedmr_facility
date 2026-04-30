@@ -1,4 +1,4 @@
-name: Deploy CubedMR_Facility (React App)
+name: Deploy CubedMR_Facility (Flutter Web)
 
 on:
   push:
@@ -16,6 +16,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
 
     steps:
       - uses: actions/checkout@v5
@@ -60,7 +63,7 @@ jobs:
             echo "📅 Deploy timestamp: $(date '+%Y%m%d-%H%M%S')"
             echo ""
 
-            # Execute backend deploy script passing all parameters
+            # Execute facility deploy script passing all parameters
             export ENVIRONMENT="$ENVIRONMENT"
             export SERVER_APP_PATH="$SERVER_APP_PATH"
             export BASE_URL="$BASE_URL"
