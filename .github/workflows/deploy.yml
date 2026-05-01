@@ -1,4 +1,4 @@
-name: Deploy CubedMR_Facility (Flutter Web)
+name: 🚀 Deploy CubedMR Facility (React APP)
 
 on:
   push:
@@ -6,65 +6,141 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target environment'
+        description: 'Entorno a desplegar'
         required: true
         default: 'staging'
         type: choice
         options:
           - staging
           - production
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+      deploy_react:
+        description: 'Deploy React SPA'
+        required: true
+        default: true
+        type: boolean
+      skip_tests:
+        description: 'Skip tests for faster deploy'
+        required: false
+        default: false
+        type: boolean
 
+jobs:
+  # ─── React SPA Deploy ─────────────────────────────────────────
+  build-react:
+    name: 🔨 Build React SPA
+    if: ${{ inputs.deploy_react }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install & Build
+        run: |
+          npm ci
+          ${{ !inputs.skip_tests && 'npx tsc --noEmit' || 'echo "Skipping type-check"' }}
+          ${{ !inputs.skip_tests && 'npx vitest run' || 'echo "Skipping tests"' }}
+          npx vite build
+        env:
+          NODE_ENV: production
+
+      - name: Package
+        run: tar -czf facility-deploy.tar.gz dist/public/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facility-deploy
+          path: facility-deploy.tar.gz
+          retention-days: 3
+
+  deploy-react:
+    name: 🚀 Deploy React SPA - ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+    needs: build-react
+    if: ${{ inputs.deploy_react }}
+    runs-on: ubuntu-latest
+    
+    # === ENVIRONMENT PROTECTION & SECRETS ===
     environment:
-      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+      url: ${{ vars.DEPLOY_URL }}
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Deploying to Server
-        uses: appleboy/ssh-action@master
+      - uses: actions/download-artifact@v4
         with:
-          host: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_HOST || secrets.STAGING_SSH_HOST }}
-          port: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_PORT || secrets.STAGING_SSH_PORT }}
-          username: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_USER || secrets.STAGING_SSH_USER }}
-          key: ${{ github.ref == 'refs/heads/main' && secrets.PROD_SSH_PRIVATE_KEY || secrets.STAGING_SSH_PRIVATE_KEY }}
+          name: facility-deploy
+
+      - name: 📝 Deploy info
+        id: info
+        run: |
+          ENV=${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
           
-          script: |
-            # Print CLI version info
-            echo "======= CLI Version Information ======="
-            ssh -V 2>&1 | head -1 || echo "OpenSSH available"
-            echo "======================================="
-            echo ""
-            
-            # Determine environment and set app path
-            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-              SERVER_APP_PATH="${{ secrets.PROD_APP_PATH }}"
-              BASE_URL="${{ secrets.PROD_BASE_URL }}"
-              ENVIRONMENT="production"
-              echo "🚀 Deploying to PRODUCTION"
-            else
-              SERVER_APP_PATH="${{ secrets.STAGING_APP_PATH }}"
-              BASE_URL="${{ secrets.STAGING_BASE_URL }}"
-              ENVIRONMENT="staging"
-              echo "🟡 Deploying to STAGING"
-            fi
+          if [ "$ENV" = "production" ]; then
+            echo "deploy_path=/var/www/production/wounddatacenter" >> $GITHUB_OUTPUT
+            echo "deploy_user=${{ secrets.PROD_DEPLOY_USER }}" >> $GITHUB_OUTPUT
+            echo "deploy_host=${{ secrets.PROD_DEPLOY_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_port=${{ secrets.PROD_DEPLOY_PORT || 22 }}" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_path=/var/www/stage/wounddatacenter" >> $GITHUB_OUTPUT
+            echo "deploy_user=${{ secrets.STAGING_DEPLOY_USER }}" >> $GITHUB_OUTPUT
+            echo "deploy_host=${{ secrets.STAGING_DEPLOY_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_port=${{ secrets.STAGING_DEPLOY_PORT || 22 }}" >> $GITHUB_OUTPUT
+          fi
 
-            # Validate APP_PATH is not empty
-            if [ -z "$SERVER_APP_PATH" ]; then
-              echo "❌ ERROR: APP_PATH is empty or not configured"
-              echo "Check that ${{ github.ref == 'refs/heads/main' && 'PROD_APP_PATH' || 'STAGING_APP_PATH' }} secret is configured in GitHub"
-              exit 1
-            fi
+      - name: 🔑 Load Environment Secrets (Variables)
+        run: |
+          echo "🌍 Deploying to: ${{ steps.info.outputs.environment }}"
+          echo "📂 Path: ${{ steps.info.outputs.deploy_path }}"
+          echo "🖥️  Host: ${{ steps.info.outputs.deploy_host }}"
+          echo "👤 User: ${{ steps.info.outputs.deploy_user }}"
+          echo "🔌 Port: ${{ steps.info.outputs.deploy_port }}"
 
-            echo "📦 Deploy path: $SERVER_APP_PATH"
-            echo "🔧 Environment: $ENVIRONMENT"
-            echo "📅 Deploy timestamp: $(date '+%Y%m%d-%H%M%S')"
-            echo ""
+      - name: 🔐 Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          
+          # Usamos la clave SSH según el entorno
+          if [ "${{ steps.info.outputs.environment }}" = "production" ]; then
+            echo "${{ secrets.PROD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          else
+            echo "${{ secrets.STAGING_DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ steps.info.outputs.deploy_port }} -H ${{ steps.info.outputs.deploy_host }} >> ~/.ssh/known_hosts 2>/dev/null || true
+      
+      - name: 🚀 Upload & Deploy
+        run: |
+          scp -P ${{ steps.info.outputs.deploy_port }} \
+            facility-deploy.tar.gz \
+            ${{ steps.info.outputs.deploy_user }}@${{ steps.info.outputs.deploy_host }}:/tmp/facility-deploy.tar.gz
 
-            # Execute facility deploy script passing all parameters
-            export ENVIRONMENT="$ENVIRONMENT"
-            export SERVER_APP_PATH="$SERVER_APP_PATH"
-            export BASE_URL="$BASE_URL"
-            /home/deploy/deploy_cubedmr_facility.sh
+          ssh -p ${{ steps.info.outputs.deploy_port }} \
+              ${{ steps.info.outputs.deploy_user }}@${{ steps.info.outputs.deploy_host }} << 'EOF'
+          set -e
+          
+          DEPLOY_PATH="${{ steps.info.outputs.deploy_path }}"
+          cd "$DEPLOY_PATH"
+          mkdir -p backups
+
+          # Backup
+          [ -d "dist/public" ] && tar -czf "backups/spa-$(date +%Y%m%d%H%M%S).tar.gz" dist/public/
+          
+          # Mantener últimos 5 backups
+          ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+
+          # Deploy
+          tar -xzf /tmp/facility-deploy.tar.gz && rm -f /tmp/facility-deploy.tar.gz
+
+          chown -R www-data:www-data dist/public
+          chmod -R 644 dist/public && find dist/public -type d -exec chmod 755 {} \;
+
+          echo "✅ Deploy completed successfully on ${{ steps.info.outputs.environment }}"
+          EOF
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
