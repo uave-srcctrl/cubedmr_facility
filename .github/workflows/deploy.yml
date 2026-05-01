@@ -25,11 +25,14 @@ on:
         type: boolean
 
 jobs:
-  # ─── React SPA Deploy ─────────────────────────────────────────
   build-react:
     name: 🔨 Build React SPA
-    if: ${{ inputs.deploy_react }}
+    # Corre siempre en push o si en manual se marca deploy_react
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_react == true)
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -41,8 +44,8 @@ jobs:
       - name: Install & Build
         run: |
           npm ci
-          ${{ !inputs.skip_tests && 'npx tsc --noEmit' || 'echo "Skipping type-check"' }}
-          ${{ !inputs.skip_tests && 'npx vitest run' || 'echo "Skipping tests"' }}
+          ${{ (github.event_name == 'workflow_dispatch' && !inputs.skip_tests) && 'npx tsc --noEmit' || 'echo "Skipping type-check"' }}
+          ${{ (github.event_name == 'workflow_dispatch' && !inputs.skip_tests) && 'npx vitest run' || 'echo "Skipping tests"' }}
           npx vite build
         env:
           NODE_ENV: production
@@ -59,20 +62,21 @@ jobs:
   deploy-react:
     name: 🚀 Deploy React SPA - ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
     needs: build-react
-    if: ${{ inputs.deploy_react }}
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_react == true)
     runs-on: ubuntu-latest
     
-    # === ENVIRONMENT PROTECTION & SECRETS ===
     environment:
       name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
-      url: ${{ vars.DEPLOY_URL }}
+      url: ${{ vars.DEPLOY_URL || 'https://your-app.com' }}
 
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: facility-deploy
 
-      - name: 📝 Deploy info
+      - name: 📝 Detect Environment
         id: info
         run: |
           ENV=${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
@@ -80,40 +84,31 @@ jobs:
           
           if [ "$ENV" = "production" ]; then
             echo "deploy_path=/var/www/production/wounddatacenter" >> $GITHUB_OUTPUT
-            echo "deploy_user=${{ secrets.PROD_DEPLOY_USER }}" >> $GITHUB_OUTPUT
-            echo "deploy_host=${{ secrets.PROD_DEPLOY_HOST }}" >> $GITHUB_OUTPUT
-            echo "deploy_port=${{ secrets.PROD_DEPLOY_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "deploy_user=${{ secrets.PROD_SSH_USER }}" >> $GITHUB_OUTPUT
+            echo "deploy_host=${{ secrets.PROD_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_port=${{ secrets.PROD_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
           else
             echo "deploy_path=/var/www/stage/wounddatacenter" >> $GITHUB_OUTPUT
-            echo "deploy_user=${{ secrets.STAGING_DEPLOY_USER }}" >> $GITHUB_OUTPUT
-            echo "deploy_host=${{ secrets.STAGING_DEPLOY_HOST }}" >> $GITHUB_OUTPUT
-            echo "deploy_port=${{ secrets.STAGING_DEPLOY_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "deploy_user=${{ secrets.STAGING_SSH_USER }}" >> $GITHUB_OUTPUT
+            echo "deploy_host=${{ secrets.STAGING_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "deploy_port=${{ secrets.STAGING_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
           fi
-
-      - name: 🔑 Load Environment Secrets (Variables)
-        run: |
-          echo "🌍 Deploying to: ${{ steps.info.outputs.environment }}"
-          echo "📂 Path: ${{ steps.info.outputs.deploy_path }}"
-          echo "🖥️  Host: ${{ steps.info.outputs.deploy_host }}"
-          echo "👤 User: ${{ steps.info.outputs.deploy_user }}"
-          echo "🔌 Port: ${{ steps.info.outputs.deploy_port }}"
 
       - name: 🔐 Configure SSH
         run: |
           mkdir -p ~/.ssh
-          
-          # Usamos la clave SSH según el entorno
           if [ "${{ steps.info.outputs.environment }}" = "production" ]; then
-            echo "${{ secrets.PROD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+            echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_rsa
           else
-            echo "${{ secrets.STAGING_DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+            echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/id_rsa
           fi
-          
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -p ${{ steps.info.outputs.deploy_port }} -H ${{ steps.info.outputs.deploy_host }} >> ~/.ssh/known_hosts 2>/dev/null || true
-      
+
       - name: 🚀 Upload & Deploy
         run: |
+          echo "🌍 Deploying to: ${{ steps.info.outputs.environment }}"
+          
           scp -P ${{ steps.info.outputs.deploy_port }} \
             facility-deploy.tar.gz \
             ${{ steps.info.outputs.deploy_user }}@${{ steps.info.outputs.deploy_host }}:/tmp/facility-deploy.tar.gz
@@ -126,13 +121,9 @@ jobs:
           cd "$DEPLOY_PATH"
           mkdir -p backups
 
-          # Backup
           [ -d "dist/public" ] && tar -czf "backups/spa-$(date +%Y%m%d%H%M%S).tar.gz" dist/public/
-          
-          # Mantener últimos 5 backups
           ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
 
-          # Deploy
           tar -xzf /tmp/facility-deploy.tar.gz && rm -f /tmp/facility-deploy.tar.gz
 
           chown -R www-data:www-data dist/public
