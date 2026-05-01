@@ -1,4 +1,4 @@
-name: 🚀 Build & Deploy React SPA
+name: 🚀 Build & Deploy React SPA (CubedMR Facility)
 
 on:
   push:
@@ -17,8 +17,10 @@ on:
         default: false
         type: boolean
 
+# Configuración global
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'                          # Actualizado desde 20
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true    # Elimina warning de Node 20
 
 jobs:
   build:
@@ -47,14 +49,14 @@ jobs:
         run: npx vitest run
 
       - name: 🔨 Build application
-        run: npm run build          # ← Mejor usar el script del package.json
+        run: npm run build
         env:
           NODE_ENV: production
 
       - name: 📦 Create deployment package
         run: |
           tar -czf facility-deploy.tar.gz -C dist/public .
-          echo "Package size: $(ls -lh facility-deploy.tar.gz | awk '{print $5}')"
+          echo "📦 Package size: $(ls -lh facility-deploy.tar.gz | awk '{print $5}')"
 
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
@@ -62,6 +64,7 @@ jobs:
           name: facility-deploy
           path: facility-deploy.tar.gz
           retention-days: 5
+
   deploy:
     name: 🚀 Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
     needs: build
@@ -101,10 +104,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets[format('{0}_SSH_PRIVATE_KEY', steps.vars.outputs.prefix)] }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          
           ssh-keyscan -p ${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }} \
             -H ${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: 🚀 Deploy on Server
+      - name: 🚀 Deploy on Server (AlmaLinux)
         run: |
           ENV=${{ steps.vars.outputs.env }}
           PREFIX=${{ steps.vars.outputs.prefix }}
@@ -136,7 +140,6 @@ jobs:
             rm -f /tmp/facility-deploy.tar.gz
 
             echo "=== Setting permissions for Apache (AlmaLinux) ==="
-            # Solo cambiamos ownership de los archivos web
             if [ -d "dist/public" ]; then
               chown -R apache:apache dist/public
               find dist/public -type d -exec chmod 755 {} \;
@@ -144,9 +147,8 @@ jobs:
               echo "✅ Permissions applied to dist/public"
             fi
 
-            # Permisos generales seguros
             chmod 755 . 2>/dev/null || true
-            echo "✅ Deployment completed successfully on $ENV"
+            echo "✅ React SPA deployed successfully to $ENV"
           DEPLOY_SCRIPT
 
       - name: 🧹 Cleanup
