@@ -1,4 +1,4 @@
-name: 🚀 Deploy React SPA (CubedMR Facility)
+name: 🚀 Build & Deploy React SPA
 
 on:
   push:
@@ -10,38 +10,71 @@ on:
         required: true
         default: 'staging'
         type: choice
-        options:
-          - staging
-          - production
+        options: [staging, production]
+      skip_tests:
+        description: 'Skip type-check and tests'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
 
 jobs:
+  build:
+    name: 🔨 Build React SPA
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📋 Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: ✅ Type check
+        if: ${{ !inputs.skip_tests }}
+        run: npx tsc --noEmit
+
+      - name: 🧪 Run tests
+        if: ${{ !inputs.skip_tests }}
+        run: npx vitest run
+
+      - name: 🔨 Build application
+        run: npm run build          # ← Mejor usar el script del package.json
+        env:
+          NODE_ENV: production
+
+      - name: 📦 Create deployment package
+        run: |
+          tar -czf facility-deploy.tar.gz -C dist/public .
+          echo "Package size: $(ls -lh facility-deploy.tar.gz | awk '{print $5}')"
+
+      - name: 📤 Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facility-deploy
+          path: facility-deploy.tar.gz
+          retention-days: 5
+
   deploy:
-    name: Deploy → ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+    name: 🚀 Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: 📥 Download artifact
+        uses: actions/download-artifact@v4
         with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install & Build
-        run: |
-          npm ci --frozen-lockfile
-          npm run build
-        env:
-          NODE_ENV: production
-          # Si necesitas pasar variables de entorno en build time:
-          VITE_BASE_URL: ${{ secrets[format('{0}_BASE_URL', inputs.environment == 'production' && 'PROD' || 'STAGING')] }}
-
-      - name: Package Build
-        run: tar -czf deploy.tar.gz -C dist .
+          name: facility-deploy
 
       - name: 📝 Detect Environment
         id: vars
@@ -55,51 +88,48 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets[format('{0}_SSH_PRIVATE_KEY', steps.vars.outputs.prefix)] }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
           ssh-keyscan -p ${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }} \
             -H ${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: 🚀 Deploy to Server
+      - name: 🚀 Deploy on Server
         run: |
           ENV=${{ steps.vars.outputs.env }}
           PREFIX=${{ steps.vars.outputs.prefix }}
           
-          HOST="${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }}"
-          USER="${{ secrets[format('{0}_SSH_USER', steps.vars.outputs.prefix)] }}"
-          PORT="${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }}"
-          APP_PATH="${{ secrets[format('{0}_APP_PATH', steps.vars.outputs.prefix)] }}/cubedmr_facility"
+          HOST="${{ secrets[format('{0}_SSH_HOST', PREFIX)] }}"
+          USER="${{ secrets[format('{0}_SSH_USER', PREFIX)] }}"
+          PORT="${{ secrets[format('{0}_SSH_PORT', PREFIX)] || 22 }}"
+          APP_PATH="${{ secrets[format('{0}_APP_PATH', PREFIX)] }}/cubedmr_facility"
 
           echo "🌍 Deploying to: $ENV"
           echo "📂 Path: $APP_PATH"
-          echo "🖥️  Host: $HOST"
-          echo "👤 User: $USER"
-          echo "🔌 Port: $PORT"
 
-          # Upload the package
-          scp -P $PORT deploy.tar.gz $USER@$HOST:/tmp/deploy.tar.gz
+          scp -P $PORT facility-deploy.tar.gz $USER@$HOST:/tmp/facility-deploy.tar.gz
 
-          # Remote deployment
-          ssh -p $PORT $USER@$HOST << 'EOF'
+          ssh -p $PORT $USER@$HOST << 'DEPLOY_SCRIPT'
             set -e
-            cd ${{ steps.vars.outputs.env == 'production' && secrets.PROD_APP_PATH || secrets.STAGING_APP_PATH }}/cubedmr_facility
+            cd $APP_PATH
 
-            echo "📦 Creating backup..."
+            echo "=== Creating backup ==="
             mkdir -p backups
-            tar -czf "backups/spa-$(date +%Y%m%d-%H%M%S).tar.gz" . 2>/dev/null || true
+            if [ -d "dist/public" ]; then
+              tar -czf "backups/spa-$(date +%Y%m%d-%H%M%S).tar.gz" dist/public/
+              ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+            fi
 
-            ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+            echo "=== Extracting new build ==="
+            rm -rf dist/public/*
+            tar -xzf /tmp/facility-deploy.tar.gz -C .
+            rm -f /tmp/facility-deploy.tar.gz
 
-            echo "🧹 Removing old files..."
-            rm -rf *
-
-            echo "📥 Extracting new build..."
-            tar -xzf /tmp/deploy.tar.gz
-            rm /tmp/deploy.tar.gz
-
-            echo "🔧 Setting permissions..."
+            echo "=== Setting permissions ==="
             chown -R www-data:www-data .
             find . -type d -exec chmod 755 {} \;
             find . -type f -exec chmod 644 {} \;
 
-            echo "✅ Deployment completed successfully on $ENV"
-          EOF
+            echo "✅ React SPA deployed successfully to $ENV"
+          DEPLOY_SCRIPT
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
