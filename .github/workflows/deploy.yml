@@ -58,84 +58,76 @@ jobs:
           retention-days: 5
 
   deploy:
-      name: 🚀 Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
-      needs: build
-      runs-on: ubuntu-latest
-      environment:
-        name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+    name: 🚀 Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
 
-      steps:
-        - uses: actions/download-artifact@v4
-          with:
-            name: facility-deploy
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: facility-deploy
 
-        - name: 📝 Detect Environment
-          id: vars
-          run: |
-            if [ -n "${{ inputs.environment }}" ]; then
-              ENV="${{ inputs.environment }}"
-            elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-              ENV="production"
-            else
-              ENV="staging"
-            fi
-            echo "env=$ENV" >> $GITHUB_OUTPUT
-            echo "🎯 Deploying to: $ENV"
+      - name: 📝 Detect Environment
+        id: vars
+        run: |
+          if [ -n "${{ inputs.environment }}" ]; then
+            ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="production"
+          else
+            ENV="staging"
+          fi
+          echo "env=$ENV" >> $GITHUB_OUTPUT
 
-        - name: 🔐 Configure SSH & Variables
-          id: ssh
-          run: |
-            mkdir -p ~/.ssh
+      - name: 🔐 Configure SSH
+        id: ssh
+        run: |
+          mkdir -p ~/.ssh
 
-            if [ "${{ steps.vars.outputs.env }}" = "production" ]; then
-              echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-              SSH_HOST="${{ secrets.PROD_SSH_HOST }}"
-              SSH_USER="${{ secrets.PROD_SSH_USER }}"
-              SSH_PORT="${{ secrets.PROD_SSH_PORT || 22 }}"
-              SERVER_APP_PATH="${{ secrets.PROD_APP_PATH }}"
-            else
-              echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-              SSH_HOST="${{ secrets.STAGING_SSH_HOST }}"
-              SSH_USER="${{ secrets.STAGING_SSH_USER }}"
-              SSH_PORT="${{ secrets.STAGING_SSH_PORT || 22 }}"
-              SERVER_APP_PATH="${{ secrets.STAGING_APP_PATH }}"
-            fi
+          if [ "${{ steps.vars.outputs.env }}" = "production" ]; then
+            echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            SSH_HOST="${{ secrets.PROD_SSH_HOST }}"
+            SSH_USER="${{ secrets.PROD_SSH_USER }}"
+            SSH_PORT="${{ secrets.PROD_SSH_PORT || 22 }}"
+            SERVER_APP_PATH="${{ secrets.PROD_APP_PATH }}"
+          else
+            echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            SSH_HOST="${{ secrets.STAGING_SSH_HOST }}"
+            SSH_USER="${{ secrets.STAGING_SSH_USER }}"
+            SSH_PORT="${{ secrets.STAGING_SSH_PORT || 22 }}"
+            SERVER_APP_PATH="${{ secrets.STAGING_APP_PATH }}"
+          fi
 
-            chmod 600 ~/.ssh/id_rsa
-            ssh-keyscan -p $SSH_PORT -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p $SSH_PORT -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
 
-            # Exportar variables para el siguiente step
-            echo "HOST=$SSH_HOST" >> $GITHUB_ENV
-            echo "USER=$SSH_USER" >> $GITHUB_ENV
-            echo "PORT=$SSH_PORT" >> $GITHUB_ENV
-            echo "SERVER_APP_PATH=$SERVER_APP_PATH" >> $GITHUB_ENV
+          echo "HOST=$SSH_HOST" >> $GITHUB_ENV
+          echo "USER=$SSH_USER" >> $GITHUB_ENV
+          echo "PORT=$SSH_PORT" >> $GITHUB_ENV
+          echo "SERVER_APP_PATH=$SERVER_APP_PATH" >> $GITHUB_ENV
+          echo "ENVIRONMENT=${{ steps.vars.outputs.env }}" >> $GITHUB_ENV
 
-            echo "SERVER_APP_PATH = $SERVER_APP_PATH"   # Debug
+      - name: 🚀 Deploy with Script
+        run: |
+          echo "🌍 Deploying to: $ENVIRONMENT"
+          echo "📂 SERVER_APP_PATH = $SERVER_APP_PATH"
 
-        - name: 🚀 Deploy + Health Check + Rollback
-          run: |
-            echo "🌍 Deploying to: ${{ steps.vars.outputs.env }}"
-            echo "📂 SERVER_APP_PATH = $SERVER_APP_PATH"
+          if [ -z "$SERVER_APP_PATH" ]; then
+            echo "❌ ERROR: SERVER_APP_PATH está vacío. Revisa los secrets."
+            exit 1
+          fi
 
-            if [ -z "$SERVER_APP_PATH" ]; then
-              echo "❌ ERROR: SERVER_APP_PATH está vacío"
-              exit 1
-            fi
+          scp -P $PORT facility-deploy.tar.gz $USER@$HOST:/tmp/facility-deploy.tar.gz
 
-            scp -P $PORT facility-deploy.tar.gz $USER@$HOST:/tmp/facility-deploy.tar.gz
-
-            ssh -p $PORT $USER@$HOST << 'EOF'
-              set -e
-              export ENVIRONMENT="${{ steps.vars.outputs.env }}"
-              export SERVER_APP_PATH="$SERVER_APP_PATH"
-
-              echo "========================================"
-              echo "📋 Variables recibidas:"
-              echo "   ENVIRONMENT   = $ENVIRONMENT"
-              echo "   SERVER_APP_PATH = $SERVER_APP_PATH"
-              echo "========================================"
-
-              /home/deploy/deploy_cubedmr_facility.sh
-            EOF
-
-  
+          ssh -p $PORT $USER@$HOST "
+            export ENVIRONMENT='$ENVIRONMENT'
+            export SERVER_APP_PATH='$SERVER_APP_PATH'
+            echo '================================'
+            echo 'Variables enviadas al servidor:'
+            echo 'ENVIRONMENT   = $ENVIRONMENT'
+            echo 'SERVER_APP_PATH = $SERVER_APP_PATH'
+            echo '================================'
+            /home/deploy/deploy_cubedmr_facility.sh
+          "
