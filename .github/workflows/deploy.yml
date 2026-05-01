@@ -78,9 +78,26 @@ jobs:
       - name: 📝 Detect Environment
         id: vars
         run: |
-          ENV=${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+          # Determinar entorno
+          if [ -n "${{ inputs.environment }}" ]; then
+            ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="production"
+          else
+            ENV="staging"
+          fi
+
+          # Determinar prefijo para secrets
+          if [ "$ENV" = "production" ]; then
+            PREFIX="PROD"
+          else
+            PREFIX="STAGING"
+          fi
+
           echo "env=$ENV" >> $GITHUB_OUTPUT
-          echo "prefix=${ENV == 'production' && 'PROD' || 'STAGING'}" >> $GITHUB_OUTPUT
+          echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Deploying to: $ENV (Prefix: $PREFIX)"
 
       - name: 🔐 Configure SSH
         run: |
