@@ -64,30 +64,32 @@ jobs:
           ENV=${{ steps.vars.outputs.env }}
           PREFIX=${{ steps.vars.outputs.prefix }}
           
-          HOST="${{ secrets[format('{0}_SSH_HOST', PREFIX)] }}"
-          USER="${{ secrets[format('{0}_SSH_USER', PREFIX)] }}"
-          PORT="${{ secrets[format('{0}_SSH_PORT', PREFIX)] || 22 }}"
-          APP_PATH="${{ secrets[format('{0}_APP_PATH', PREFIX)] }}/cubedmr_facility"
+          HOST="${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }}"
+          USER="${{ secrets[format('{0}_SSH_USER', steps.vars.outputs.prefix)] }}"
+          PORT="${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }}"
+          APP_PATH="${{ secrets[format('{0}_APP_PATH', steps.vars.outputs.prefix)] }}/cubedmr_facility"
 
           echo "🌍 Deploying to: $ENV"
           echo "📂 Path: $APP_PATH"
+          echo "🖥️  Host: $HOST"
+          echo "👤 User: $USER"
+          echo "🔌 Port: $PORT"
 
-          # Upload
+          # Upload the package
           scp -P $PORT deploy.tar.gz $USER@$HOST:/tmp/deploy.tar.gz
 
-          # Deploy en servidor
+          # Remote deployment
           ssh -p $PORT $USER@$HOST << 'EOF'
             set -e
-            cd ${{ env.APP_PATH }}
+            cd ${{ steps.vars.outputs.env == 'production' && secrets.PROD_APP_PATH || secrets.STAGING_APP_PATH }}/cubedmr_facility
 
             echo "📦 Creating backup..."
             mkdir -p backups
             tar -czf "backups/spa-$(date +%Y%m%d-%H%M%S).tar.gz" . 2>/dev/null || true
 
-            # Mantener solo últimos 5 backups
             ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
 
-            echo "🧹 Cleaning old files..."
+            echo "🧹 Removing old files..."
             rm -rf *
 
             echo "📥 Extracting new build..."
