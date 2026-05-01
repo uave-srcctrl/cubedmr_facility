@@ -17,10 +17,9 @@ on:
         default: false
         type: boolean
 
-# Configuración global
 env:
-  NODE_VERSION: '22'                          # Actualizado desde 20
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true    # Elimina warning de Node 20
+  NODE_VERSION: '22'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -28,38 +27,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 📦 Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: 📋 Install dependencies
+      - name: Install dependencies
         run: npm ci --frozen-lockfile
 
-      - name: ✅ Type check
+      - name: Type check & Tests
         if: ${{ !inputs.skip_tests }}
-        run: npx tsc --noEmit
+        run: |
+          npx tsc --noEmit
+          npx vitest run
 
-      - name: 🧪 Run tests
-        if: ${{ !inputs.skip_tests }}
-        run: npx vitest run
-
-      - name: 🔨 Build application
+      - name: Build
         run: npm run build
         env:
           NODE_ENV: production
 
-      - name: 📦 Create deployment package
-        run: |
-          tar -czf facility-deploy.tar.gz -C dist/public .
-          echo "📦 Package size: $(ls -lh facility-deploy.tar.gz | awk '{print $5}')"
+      - name: Package artifact
+        run: tar -czf facility-deploy.tar.gz -C dist/public .
 
-      - name: 📤 Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: facility-deploy
           path: facility-deploy.tar.gz
@@ -73,8 +65,7 @@ jobs:
       name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
 
     steps:
-      - name: 📥 Download artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: facility-deploy
 
@@ -88,68 +79,52 @@ jobs:
           else
             ENV="staging"
           fi
-
-          if [ "$ENV" = "production" ]; then
-            PREFIX="PROD"
-          else
-            PREFIX="STAGING"
-          fi
-
           echo "env=$ENV" >> $GITHUB_OUTPUT
-          echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
           echo "🎯 Deploying to: $ENV"
 
       - name: 🔐 Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets[format('{0}_SSH_PRIVATE_KEY', steps.vars.outputs.prefix)] }}" > ~/.ssh/id_rsa
+
+          if [ "${{ steps.vars.outputs.env }}" = "production" ]; then
+            echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            SSH_HOST="${{ secrets.PROD_SSH_HOST }}"
+            SSH_USER="${{ secrets.PROD_SSH_USER }}"
+            SSH_PORT="${{ secrets.PROD_SSH_PORT || 22 }}"
+            SERVER_APP_PATH="${{ secrets.PROD_APP_PATH }}"
+          else
+            echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            SSH_HOST="${{ secrets.STAGING_SSH_HOST }}"
+            SSH_USER="${{ secrets.STAGING_SSH_USER }}"
+            SSH_PORT="${{ secrets.STAGING_SSH_PORT || 22 }}"
+            SERVER_APP_PATH="${{ secrets.STAGING_APP_PATH }}"
+          fi
+
           chmod 600 ~/.ssh/id_rsa
-          
-          ssh-keyscan -p ${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }} \
-            -H ${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p $SSH_PORT -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: 🚀 Deploy on Server (AlmaLinux)
+          echo "HOST=$SSH_HOST" >> $GITHUB_ENV
+          echo "USER=$SSH_USER" >> $GITHUB_ENV
+          echo "PORT=$SSH_PORT" >> $GITHUB_ENV
+          echo "SERVER_APP_PATH=$SERVER_APP_PATH" >> $GITHUB_ENV
+
+      - name: 🚀 Deploy using Server Script
         run: |
-          ENV=${{ steps.vars.outputs.env }}
-          PREFIX=${{ steps.vars.outputs.prefix }}
-          
-          HOST="${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }}"
-          USER="${{ secrets[format('{0}_SSH_USER', steps.vars.outputs.prefix)] }}"
-          PORT="${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }}"
-          APP_PATH="${{ secrets[format('{0}_APP_PATH', steps.vars.outputs.prefix)] }}/cubedmr_facility"
+          echo "🌍 Deploying to: ${{ steps.vars.outputs.env }}"
+          echo "📂 Path: $SERVER_APP_PATH/cubedmr_facility"
 
-          echo "🌍 Deploying to: $ENV"
-          echo "📂 Path: $APP_PATH"
-
+          # Subir artefacto
           scp -P $PORT facility-deploy.tar.gz $USER@$HOST:/tmp/facility-deploy.tar.gz
 
-          ssh -p $PORT $USER@$HOST << 'DEPLOY_SCRIPT'
+          # Ejecutar script en servidor
+          ssh -p $PORT $USER@$HOST << 'EOF'
             set -e
-            cd $APP_PATH
+            export ENVIRONMENT="${{ steps.vars.outputs.env }}"
+            export SERVER_APP_PATH="$SERVER_APP_PATH"
 
-            echo "=== Creating backup ==="
-            mkdir -p backups
-            if [ -d "dist/public" ]; then
-              tar -czf "backups/spa-$(date +%Y%m%d-%H%M%S).tar.gz" dist/public/
-              ls -t backups/spa-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
-            fi
-
-            echo "=== Extracting new build ==="
-            rm -rf dist/public/*
-            tar -xzf /tmp/facility-deploy.tar.gz -C .
-            rm -f /tmp/facility-deploy.tar.gz
-
-            echo "=== Setting permissions for Apache (AlmaLinux) ==="
-            if [ -d "dist/public" ]; then
-              chown -R apache:apache dist/public
-              find dist/public -type d -exec chmod 755 {} \;
-              find dist/public -type f -exec chmod 644 {} \;
-              echo "✅ Permissions applied to dist/public"
-            fi
-
-            chmod 755 . 2>/dev/null || true
-            echo "✅ React SPA deployed successfully to $ENV"
-          DEPLOY_SCRIPT
+            echo "🚀 Ejecutando script de despliegue..."
+            /home/deploy/deploy_cubedmr_facility.sh
+          EOF
 
       - name: 🧹 Cleanup
         if: always()
