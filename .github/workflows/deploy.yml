@@ -78,7 +78,6 @@ jobs:
       - name: 📝 Detect Environment
         id: vars
         run: |
-          # Determinar entorno
           if [ -n "${{ inputs.environment }}" ]; then
             ENV="${{ inputs.environment }}"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
@@ -87,7 +86,6 @@ jobs:
             ENV="staging"
           fi
 
-          # Determinar prefijo para secrets
           if [ "$ENV" = "production" ]; then
             PREFIX="PROD"
           else
@@ -96,14 +94,13 @@ jobs:
 
           echo "env=$ENV" >> $GITHUB_OUTPUT
           echo "prefix=$PREFIX" >> $GITHUB_OUTPUT
-          echo "🎯 Deploying to: $ENV (Prefix: $PREFIX)"
+          echo "🎯 Deploying to: $ENV"
 
       - name: 🔐 Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets[format('{0}_SSH_PRIVATE_KEY', steps.vars.outputs.prefix)] }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
           ssh-keyscan -p ${{ secrets[format('{0}_SSH_PORT', steps.vars.outputs.prefix)] || 22 }} \
             -H ${{ secrets[format('{0}_SSH_HOST', steps.vars.outputs.prefix)] }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
@@ -120,10 +117,8 @@ jobs:
           echo "🌍 Deploying to: $ENV"
           echo "📂 Path: $APP_PATH"
 
-          # Subir paquete
           scp -P $PORT facility-deploy.tar.gz $USER@$HOST:/tmp/facility-deploy.tar.gz
 
-          # Despliegue en servidor (AlmaLinux)
           ssh -p $PORT $USER@$HOST << 'DEPLOY_SCRIPT'
             set -e
             cd $APP_PATH
@@ -141,12 +136,17 @@ jobs:
             rm -f /tmp/facility-deploy.tar.gz
 
             echo "=== Setting permissions for Apache (AlmaLinux) ==="
-            chown -R apache:apache .
-            find . -type d -exec chmod 755 {} \;
-            find . -type f -exec chmod 644 {} \;
+            # Solo cambiamos ownership de los archivos web
+            if [ -d "dist/public" ]; then
+              chown -R apache:apache dist/public
+              find dist/public -type d -exec chmod 755 {} \;
+              find dist/public -type f -exec chmod 644 {} \;
+              echo "✅ Permissions applied to dist/public"
+            fi
 
-            echo "✅ React SPA deployed successfully to $ENV"
-            echo "📊 Permissions set: apache:apache"
+            # Permisos generales seguros
+            chmod 755 . 2>/dev/null || true
+            echo "✅ Deployment completed successfully on $ENV"
           DEPLOY_SCRIPT
 
       - name: 🧹 Cleanup
