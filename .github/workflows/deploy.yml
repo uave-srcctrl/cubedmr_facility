@@ -55,7 +55,7 @@ jobs:
         with:
           name: facility-deploy
           path: facility-deploy.tar.gz
-          retention-days: 5
+          retention-days: 7
 
   deploy:
     name: 🚀 Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
@@ -115,7 +115,7 @@ jobs:
           echo "📂 SERVER_APP_PATH = $SERVER_APP_PATH"
 
           if [ -z "$SERVER_APP_PATH" ]; then
-            echo "❌ ERROR: SERVER_APP_PATH está vacío. Revisa los secrets."
+            echo "❌ ERROR: SERVER_APP_PATH está vacío"
             exit 1
           fi
 
@@ -125,9 +125,13 @@ jobs:
             export ENVIRONMENT='$ENVIRONMENT'
             export SERVER_APP_PATH='$SERVER_APP_PATH'
             echo '================================'
-            echo 'Variables enviadas al servidor:'
+            echo 'Variables enviadas:'
             echo 'ENVIRONMENT   = $ENVIRONMENT'
             echo 'SERVER_APP_PATH = $SERVER_APP_PATH'
             echo '================================'
             /home/deploy/deploy_cubedmr_facility.sh
           "
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa facility-deploy.tar.gz
