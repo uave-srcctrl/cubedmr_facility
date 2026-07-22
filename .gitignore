@@ -9,6 +9,7 @@ vite.config.ts.*
 
 # Logs
 logs/
+*.log
 server-login.log
 nohup.out
 
