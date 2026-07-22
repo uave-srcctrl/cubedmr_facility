@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Unit Tests: Data transforms (data layer)
  *
