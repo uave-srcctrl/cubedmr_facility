@@ -3,6 +3,7 @@ import { LOCAL_API } from "@/lib/api-config";
 import { useAuth } from "./use-auth";
 import { useCallback, useEffect, useState } from "react";
 import { secureStorageSync } from "@/lib/secure-storage";
+import { logger } from "@/lib/logger";
 
 // ==================== TYPES ====================
 
@@ -358,7 +359,7 @@ function getLocalSettings(): AppSettings {
       return migrateSettings(JSON.parse(saved));
     }
   } catch (error) {
-    console.error('[useSettings] Error loading local settings:', error);
+    logger.error('[useSettings] Error loading local settings:', error);
   }
   return DEFAULT_SETTINGS;
 }
@@ -370,7 +371,7 @@ function saveLocalSettings(settings: AppSettings): void {
   try {
     localStorage.setItem(SETTINGS_LOCAL_KEY, JSON.stringify(settings));
   } catch (error) {
-    console.error('[useSettings] Error saving local settings:', error);
+    logger.error('[useSettings] Error saving local settings:', error);
   }
 }
 
@@ -399,7 +400,7 @@ export function useSettings() {
     queryKey: ["userSettings", userId],
     queryFn: async () => {
       if (!userId || !token || !email) {
-        console.log('[useSettings] Missing auth params, using local settings');
+        logger.debug('[useSettings] Missing auth params, using local settings');
         return null;
       }
 
@@ -420,7 +421,7 @@ export function useSettings() {
         });
 
         if (!response.ok) {
-          console.error('[useSettings] Failed to fetch settings from DB');
+          logger.error('[useSettings] Failed to fetch settings from DB');
           return null;
         }
 
@@ -434,15 +435,15 @@ export function useSettings() {
           // Cache locally
           saveLocalSettings(migrated);
 
-          console.log('[useSettings] Loaded settings from DB');
+          logger.debug('[useSettings] Loaded settings from DB');
           return migrated;
         } else {
           // No settings in DB, return null (will use defaults)
-          console.log('[useSettings] No settings in DB, using defaults');
+          logger.debug('[useSettings] No settings in DB, using defaults');
           return null;
         }
       } catch (error) {
-        console.error('[useSettings] Error fetching settings:', error);
+        logger.error('[useSettings] Error fetching settings:', error);
         return null;
       }
     },
@@ -464,7 +465,7 @@ export function useSettings() {
       saveLocalSettings(newSettings);
 
       if (!userId || !token || !email) {
-        console.log('[useSettings] Missing auth params, saved locally only');
+        logger.debug('[useSettings] Missing auth params, saved locally only');
         return { success: true, local: true };
       }
 
@@ -492,13 +493,13 @@ export function useSettings() {
         const result = await response.json();
 
         if (result.status) {
-          console.log('[useSettings] Settings saved to DB');
+          logger.debug('[useSettings] Settings saved to DB');
           return { success: true, local: false };
         } else {
           throw new Error(result.error || 'Unknown error saving settings');
         }
       } catch (error) {
-        console.error('[useSettings] Error saving to DB, saved locally:', error);
+        logger.error('[useSettings] Error saving to DB, saved locally:', error);
         return { success: true, local: true, error };
       }
     },

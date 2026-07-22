@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { onAuthEvent, AUTH_EVENTS, dispatchAuthEvent } from "@/lib/auth-events";
+import { logger } from "@/lib/logger";
 
 // Storage keys
 const STORAGE_KEY_START = "wdc_startDate";
@@ -132,7 +133,7 @@ export function usePersistedDates({ facilityId, singleDateMode = false }: Persis
   // Listen for facility changes - clear stored dates
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[usePersistedDates] Facility changed, clearing stored dates');
+      logger.debug('[usePersistedDates] Facility changed, clearing stored dates');
       clearDates();
     });
     return unsubscribe;
@@ -141,7 +142,7 @@ export function usePersistedDates({ facilityId, singleDateMode = false }: Persis
   // Listen for data import - clear stored dates so new range is used
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.DATA_IMPORTED, () => {
-      console.log('[usePersistedDates] Data imported, clearing stored dates for refresh');
+      logger.debug('[usePersistedDates] Data imported, clearing stored dates for refresh');
       clearDates();
     });
     return unsubscribe;

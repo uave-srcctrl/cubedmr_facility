@@ -24,6 +24,7 @@ import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { WoundsByEtiologyModal } from "@/components/wounds-by-etiology-modal";
 import { normalizeFieldNamesArray } from "@/lib/field-mapper";
 import { useLocation } from "wouter";
+import { logger } from "@/lib/logger";
 
 // Colors for the chart - pastel with solid border colors
 const COLORS = [
@@ -73,7 +74,7 @@ export default function EtiologyReport() {
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[EtiologyReport] 🔄 Facility changed:', newFacilityId);
+      logger.debug('[EtiologyReport] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
     });
     return unsubscribe;
@@ -171,7 +172,7 @@ export default function EtiologyReport() {
         deviceId: "etiology-report",
       });
 
-      console.log('[EtiologyReport] Received response:', result);
+      logger.debug('[EtiologyReport] Received response:', result);
 
       if (!result || result.status === false) {
         throw new Error(result?.error || "Failed to fetch etiology data");

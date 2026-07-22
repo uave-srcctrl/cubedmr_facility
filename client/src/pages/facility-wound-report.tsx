@@ -28,6 +28,7 @@ import { DeterioratingWoundsModal } from "@/components/deteriorating-wounds-moda
 import { WoundActivityModal, WoundActivityType } from "@/components/wound-activity-modal";
 import { LOCAL_API } from "@/lib/api-config";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart } from "recharts";
+import { logger } from "@/lib/logger";
 
 export default function FacilityWoundReport() {
   const { getAuthInfo, getSelectedFacility, getToken, getEmail } = useAuth();
@@ -57,7 +58,7 @@ export default function FacilityWoundReport() {
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[FacilityWoundReport] 🔄 Facility changed:', newFacilityId);
+      logger.debug('[FacilityWoundReport] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
       setDatesInitialized(false); // Reset dates initialization when facility changes
     });
@@ -74,7 +75,7 @@ export default function FacilityWoundReport() {
       const [endYear, endMonth, endDay] = lastDateStr.split('-').map(Number);
       const lastDate = new Date(endYear, endMonth - 1, endDay);
 
-      console.log('[FacilityWoundReport] Setting date range to most recent:', lastDateStr);
+      logger.debug('[FacilityWoundReport] Setting date range to most recent:', lastDateStr);
 
       setStartDate(lastDate);
       setEndDate(lastDate);
@@ -98,11 +99,11 @@ export default function FacilityWoundReport() {
     return { firstEncounterDate: undefined, lastEncounterDate: undefined };
   }, [enabledDates]);
 
-  console.log('[FacilityWoundReport] authInfo:', authInfo);
-  console.log('[FacilityWoundReport] facilityId:', facilityId);
-  console.log('[FacilityWoundReport] token present:', !!token);
-  console.log('[FacilityWoundReport] email:', email);
-  console.log('[FacilityWoundReport] Date range:', startDateStr, 'to', endDateStr);
+  logger.debug('[FacilityWoundReport] authInfo:', authInfo);
+  logger.debug('[FacilityWoundReport] facilityId:', facilityId);
+  logger.debug('[FacilityWoundReport] token present:', !!token);
+  logger.debug('[FacilityWoundReport] email:', email);
+  logger.debug('[FacilityWoundReport] Date range:', startDateStr, 'to', endDateStr);
 
   // If no facilityId, show error - shouldn't happen if auth is working
   if (!facilityId) {
@@ -267,7 +268,7 @@ export default function FacilityWoundReport() {
         endDate: endDateStr,
       });
 
-      console.log('[FacilityWoundReport] Received response:', result);
+      logger.debug('[FacilityWoundReport] Received response:', result);
 
       if (result.data?.data) {
         const dataArray = Array.isArray(result.data.data) ? result.data.data : [result.data.data];
@@ -304,7 +305,7 @@ export default function FacilityWoundReport() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      console.log('[FacilityWoundReport] Fetching PUSH score data for:', startDateStr, 'to', endDateStr);
+      logger.debug('[FacilityWoundReport] Fetching PUSH score data for:', startDateStr, 'to', endDateStr);
 
       const response = await fetch(url, {
         method: "POST",
@@ -326,7 +327,7 @@ export default function FacilityWoundReport() {
       }
 
       const result = await response.json();
-      console.log('[FacilityWoundReport] PUSH score query result:', result);
+      logger.debug('[FacilityWoundReport] PUSH score query result:', result);
 
       if (result.status === false) {
         throw new Error(result.error || "Failed to fetch wound encounters");
@@ -344,7 +345,7 @@ export default function FacilityWoundReport() {
         });
       }
 
-      console.log('[FacilityWoundReport] Flattened encounters:', flatEncounters.length);
+      logger.debug('[FacilityWoundReport] Flattened encounters:', flatEncounters.length);
       return flatEncounters;
     },
     enabled: !!facilityId && !!token && !!startDateStr && !!endDateStr

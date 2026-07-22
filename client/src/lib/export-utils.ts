@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { logger } from "@/lib/logger";
 
 // ============================================================================
 // EXCEL EXPORT
@@ -35,7 +36,7 @@ export async function exportToExcel(
   options?: ExcelExportOptions
 ) {
   if (!data || data.length === 0) {
-    console.warn('No data to export');
+    logger.warn('No data to export');
     return;
   }
 
@@ -89,7 +90,7 @@ export async function exportToExcel(
       // Place logo in columns A-B, rows 1-5
       worksheet.addImage(imageId, 'A1:B5' as any);
     } catch (e) {
-      console.warn('Could not load logo for Excel:', e);
+      logger.warn('Could not load logo for Excel:', e);
     }
   }
   
@@ -185,7 +186,7 @@ export async function exportToPDF(
 ) {
   const element = document.getElementById(elementId);
   if (!element) {
-    console.error(`Element with id "${elementId}" not found`);
+    logger.error(`Element with id "${elementId}" not found`);
     return;
   }
 
@@ -255,7 +256,7 @@ export async function exportToPDF(
     // Save file
     pdf.save(fullFilename);
   } catch (error) {
-    console.error('Error exporting to PDF:', error);
+    logger.error('Error exporting to PDF:', error);
     throw error;
   }
 }
@@ -270,7 +271,7 @@ export async function exportTableToPDF(
   options: PDFExportOptions = {}
 ) {
   if (!data || data.length === 0) {
-    console.warn('No data to export');
+    logger.warn('No data to export');
     return;
   }
 
@@ -308,7 +309,7 @@ export async function exportTableToPDF(
       const logoX = pageWidth - margin - logoWidth;
       pdf.addImage(img, 'PNG', logoX, margin, logoWidth, logoHeight);
     } catch (e) {
-      console.warn('Could not load logo for PDF:', e);
+      logger.warn('Could not load logo for PDF:', e);
     }
   }
 
@@ -415,14 +416,14 @@ export async function exportTableToPDF(
 export function printElement(elementId: string, title?: string) {
   const element = document.getElementById(elementId);
   if (!element) {
-    console.error(`Element with id "${elementId}" not found`);
+    logger.error(`Element with id "${elementId}" not found`);
     return;
   }
 
   // Create print window
   const printWindow = window.open('', '_blank', 'width=1200,height=800');
   if (!printWindow) {
-    console.error('Could not open print window');
+    logger.error('Could not open print window');
     return;
   }
 

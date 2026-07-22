@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Secure Storage Utility for HIPAA Compliance
  * 
@@ -257,7 +258,7 @@ export const secureStorageSync = {
     if (SENSITIVE_KEYS.includes(key)) {
       cachedValues.set(key, value);
       // Async encrypt and store
-      secureStorage.setItem(key, value).catch(console.error);
+      secureStorage.setItem(key, value).catch(logger.error);
     } else {
       localStorage.setItem(key, value);
     }

@@ -37,6 +37,7 @@ import { useSettings } from "@/hooks/use-settings";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { useNavigationGuard } from "@/contexts/import-context";
 import { useToast } from "@/hooks/use-toast";
+import { logger } from "@/lib/logger";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -45,9 +46,9 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, user, onLogout }: LayoutProps) {
-  console.log('[Layout] Component mounted/rendered with user:', user?.name);
+  logger.debug('[Layout] Component mounted/rendered with user:', user?.name);
   const [location] = useLocation();
-  console.log('[Layout] Current location:', location);
+  logger.debug('[Layout] Current location:', location);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { toast } = useToast();
   const { canNavigate, isImporting, importProgress } = useNavigationGuard();
@@ -107,7 +108,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
       });
       return;
     }
-    console.log(`[Layout] Changing facility to: ${facilityId}`);
+    logger.debug(`[Layout] Changing facility to: ${facilityId}`);
     setSelectedFacility(facilityId);
     setSelectedFacilityIdLocal(facilityId);
     navigate('/facility/');
@@ -122,7 +123,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
       });
       return;
     }
-    console.log('[Layout] Clearing facility and navigating to selector');
+    logger.debug('[Layout] Clearing facility and navigating to selector');
     clearSelectedFacility();
     setSelectedFacilityIdLocal(null);
     setSelectedFacilityInfoLocal(null);

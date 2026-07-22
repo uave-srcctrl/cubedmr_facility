@@ -41,6 +41,7 @@ import { EcgLoader } from "@/components/ecg-loader";
 import { cn } from "@/lib/utils";
 import { useUpdateWoundEncounter } from "@/hooks/use-patients";
 import { useQueryClient } from "@tanstack/react-query";
+import { logger } from "@/lib/logger";
 
 // Generic wound data interface that both WoundEncounter and CriticalWound can satisfy
 export interface EditableWound {
@@ -256,7 +257,7 @@ export function WoundEditModal({
       onSaveSuccess?.();
       handleClose();
     } catch (error) {
-      console.error('Failed to update wound:', error);
+      logger.error('Failed to update wound:', error);
       toast({
         variant: "destructive",
         title: "Error Saving Wound",

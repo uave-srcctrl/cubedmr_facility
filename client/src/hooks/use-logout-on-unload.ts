@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAuth } from './use-auth';
+import { logger } from "@/lib/logger";
 
 /**
  * Hook that triggers logout when the browser tab/window is closed or the page is unloaded
@@ -22,7 +23,7 @@ export function useLogoutOnUnload() {
     }
 
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      console.log('[useLogoutOnUnload] beforeunload event fired - user closing tab/window');
+      logger.debug('[useLogoutOnUnload] beforeunload event fired - user closing tab/window');
       
       try {
         const token = localStorage.getItem("authToken");
@@ -39,10 +40,10 @@ export function useLogoutOnUnload() {
           // Set content type header for JSON
           const blob = new Blob([payload], { type: 'application/json' });
           navigator.sendBeacon(logoutUrl, blob);
-          console.log('[useLogoutOnUnload] Sent beacon logout request to server');
+          logger.debug('[useLogoutOnUnload] Sent beacon logout request to server');
         }
       } catch (error) {
-        console.error('[useLogoutOnUnload] Error sending beacon during beforeunload:', error);
+        logger.error('[useLogoutOnUnload] Error sending beacon during beforeunload:', error);
       }
       
       // IMPORTANT: DO NOT clear localStorage here because:
@@ -50,18 +51,18 @@ export function useLogoutOnUnload() {
       // - Clearing it when closing ONE tab will affect other open tabs
       // - sessionStorage is automatically cleared when the LAST tab closes
       // - Instead, we rely on tokens being stored in sessionStorage
-      console.log('[useLogoutOnUnload] Tab/window closed - session will persist in other tabs');
+      logger.debug('[useLogoutOnUnload] Tab/window closed - session will persist in other tabs');
     };
 
     // Add event listener
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    console.log('[useLogoutOnUnload] Listeners attached - logout on tab/window close enabled');
+    logger.debug('[useLogoutOnUnload] Listeners attached - logout on tab/window close enabled');
 
     // Cleanup: remove listeners when component unmounts
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      console.log('[useLogoutOnUnload] Listeners removed');
+      logger.debug('[useLogoutOnUnload] Listeners removed');
     };
   }, [logout, isAuthenticated]);
 }

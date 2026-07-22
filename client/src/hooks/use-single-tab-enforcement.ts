@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { logger } from "@/lib/logger";
 
 /**
  * Hook that enforces only one active tab of the application per browser
@@ -23,7 +24,7 @@ export function useSingleTabEnforcement() {
     // Generate unique ID for this tab
     const currentTabId = Date.now().toString() + Math.random().toString(36);
     
-    console.log('[useSingleTabEnforcement] Tab initialized with ID:', currentTabId);
+    logger.debug('[useSingleTabEnforcement] Tab initialized with ID:', currentTabId);
 
     // Try to become the active tab
     const registerTab = () => {
@@ -37,24 +38,24 @@ export function useSingleTabEnforcement() {
           const timeSinceLastHeartbeat = now - (parseInt(existingTimestamp || '0') || 0);
           
           if (timeSinceLastHeartbeat < HEARTBEAT_TIMEOUT) {
-            console.log('[useSingleTabEnforcement] Another active tab found. Blocking this tab.');
+            logger.debug('[useSingleTabEnforcement] Another active tab found. Blocking this tab.');
             setIsActiveTab(false);
             setShowBlockedMessage(true);
             return false;
           } else {
-            console.log('[useSingleTabEnforcement] Previous tab is inactive (no heartbeat). Taking over.');
+            logger.debug('[useSingleTabEnforcement] Previous tab is inactive (no heartbeat). Taking over.');
           }
         }
         
         // Register this tab as active
         localStorage.setItem(TAB_ID_KEY, currentTabId);
         localStorage.setItem(TAB_TIMESTAMP_KEY, now.toString());
-        console.log('[useSingleTabEnforcement] This tab is now active');
+        logger.debug('[useSingleTabEnforcement] This tab is now active');
         setIsActiveTab(true);
         setShowBlockedMessage(false);
         return true;
       } catch (error) {
-        console.error('[useSingleTabEnforcement] Error registering tab:', error);
+        logger.error('[useSingleTabEnforcement] Error registering tab:', error);
         return false;
       }
     };
@@ -66,10 +67,10 @@ export function useSingleTabEnforcement() {
         if (existingTabId === currentTabId) {
           localStorage.removeItem(TAB_ID_KEY);
           localStorage.removeItem(TAB_TIMESTAMP_KEY);
-          console.log('[useSingleTabEnforcement] Tab unregistered');
+          logger.debug('[useSingleTabEnforcement] Tab unregistered');
         }
       } catch (error) {
-        console.error('[useSingleTabEnforcement] Error unregistering tab:', error);
+        logger.error('[useSingleTabEnforcement] Error unregistering tab:', error);
       }
     };
 
@@ -79,17 +80,17 @@ export function useSingleTabEnforcement() {
         const existingTabId = localStorage.getItem(TAB_ID_KEY);
         if (existingTabId === currentTabId) {
           localStorage.setItem(TAB_TIMESTAMP_KEY, Date.now().toString());
-          console.log('[useSingleTabEnforcement] Heartbeat sent');
+          logger.debug('[useSingleTabEnforcement] Heartbeat sent');
         }
       } catch (error) {
-        console.error('[useSingleTabEnforcement] Error sending heartbeat:', error);
+        logger.error('[useSingleTabEnforcement] Error sending heartbeat:', error);
       }
     };
 
     // Listen for storage changes from other tabs
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === TAB_ID_KEY) {
-        console.log('[useSingleTabEnforcement] Detected tab change from another tab');
+        logger.debug('[useSingleTabEnforcement] Detected tab change from another tab');
         // Re-check if we should be the active tab
         registerTab();
       }
@@ -112,14 +113,14 @@ export function useSingleTabEnforcement() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    console.log('[useSingleTabEnforcement] Enforcement enabled - only one tab allowed');
+    logger.debug('[useSingleTabEnforcement] Enforcement enabled - only one tab allowed');
 
     return () => {
       clearInterval(heartbeatInterval);
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       unregisterTab();
-      console.log('[useSingleTabEnforcement] Cleanup completed');
+      logger.debug('[useSingleTabEnforcement] Cleanup completed');
     };
   }, []);
 

@@ -61,6 +61,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { useLocation } from 'wouter';
 import { dispatchAuthEvent, AUTH_EVENTS } from '@/lib/auth-events';
+import { logger } from "@/lib/logger";
 
 interface ImportLog {
   id: number;
@@ -202,22 +203,22 @@ export default function ImportAudit() {
   // Revert import mutation
   const revertMutation = useMutation({
     mutationFn: async (importId: string) => {
-      console.log('[ImportAudit] Attempting to revert import:', importId);
+      logger.debug('[ImportAudit] Attempting to revert import:', importId);
       const response = await fetch(
         `${LOCAL_API.IMPORT_AUDIT}?import_id=${importId}`,
         { method: 'DELETE' }
       );
-      console.log('[ImportAudit] Revert response status:', response.status);
+      logger.debug('[ImportAudit] Revert response status:', response.status);
       if (!response.ok) {
         const error = await response.json();
-        console.error('[ImportAudit] Revert HTTP error:', error);
+        logger.error('[ImportAudit] Revert HTTP error:', error);
         throw new Error(error.error || 'Failed to revert import');
       }
       const data = await response.json();
-      console.log('[ImportAudit] Revert response data:', data);
+      logger.debug('[ImportAudit] Revert response data:', data);
       // Also check for success: false in response body
       if (data.success === false) {
-        console.error('[ImportAudit] Revert returned success=false:', data);
+        logger.error('[ImportAudit] Revert returned success=false:', data);
         throw new Error(data.error || 'Failed to revert import');
       }
       return data;
@@ -253,11 +254,11 @@ export default function ImportAudit() {
           setLocation('/facility/');
         }
       } catch (err) {
-        console.error('[ImportAudit] Failed to refresh facilities:', err);
+        logger.error('[ImportAudit] Failed to refresh facilities:', err);
       }
     },
     onError: (error: Error) => {
-      console.error('[ImportAudit] Revert mutation error:', error);
+      logger.error('[ImportAudit] Revert mutation error:', error);
       toast({
         title: 'Revert Failed',
         description: error.message,
@@ -679,7 +680,7 @@ export default function ImportAudit() {
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  console.log('[ImportAudit] Revert button clicked for:', log.import_id, 'records_inserted:', log.records_inserted, 'type:', typeof log.records_inserted);
+                                  logger.debug('[ImportAudit] Revert button clicked for:', log.import_id, 'records_inserted:', log.records_inserted, 'type:', typeof log.records_inserted);
                                   handleRevertClick(log);
                                 }}
                                 disabled={

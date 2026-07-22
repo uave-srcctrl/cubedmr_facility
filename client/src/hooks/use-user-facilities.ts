@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { LOCAL_API } from "@/lib/api-config";
 import { useAuth } from "./use-auth";
+import { logger } from "@/lib/logger";
 
 interface UserFacilities {
   status: boolean;
@@ -18,7 +19,7 @@ interface UserFacilities {
  * Usage:
  * const { data, isLoading, error } = useUserFacilities();
  * if (data?.facilities) {
- *   console.log("User has access to:", data.facilities);
+ *   logger.debug("User has access to:", data.facilities);
  * }
  */
 export function useUserFacilities() {
@@ -56,7 +57,7 @@ export function useUserFacilities() {
  * Usage:
  * const hasAccess = useHasFacilityAccess("5");
  * if (hasAccess) {
- *   console.log("User can access facility 5");
+ *   logger.debug("User can access facility 5");
  * }
  */
 export function useHasFacilityAccess(facilityId: string | number | null): boolean {
@@ -76,7 +77,7 @@ export function useHasFacilityAccess(facilityId: string | number | null): boolea
  * Usage:
  * const currentFacility = useCurrentFacility();
  * if (currentFacility) {
- *   console.log("Current facility:", currentFacility);
+ *   logger.debug("Current facility:", currentFacility);
  * }
  */
 export function useCurrentFacility() {

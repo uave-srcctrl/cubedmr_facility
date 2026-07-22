@@ -18,6 +18,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useSettings } from '@/hooks/use-settings';
 import { createSampleExcel, validateExcelData } from '@/lib/excel-utils';
+import { logger } from "@/lib/logger";
 
 interface ExcelRow {
   [key: string]: any;
@@ -133,7 +134,7 @@ export default function ExcelImportPage() {
           });
 
         } catch (error) {
-          console.error('Error processing file:', error);
+          logger.error('Error processing file:', error);
           setImportResult({
             success: false,
             message: 'Error processing the Excel file.',
@@ -145,7 +146,7 @@ export default function ExcelImportPage() {
       reader.readAsArrayBuffer(file);
 
     } catch (error) {
-      console.error('Error reading file:', error);
+      logger.error('Error reading file:', error);
       setImportResult({
         success: false,
         message: 'Error reading the file.',
@@ -199,7 +200,7 @@ export default function ExcelImportPage() {
       });
 
     } catch (error) {
-      console.error('Import error:', error);
+      logger.error('Import error:', error);
       setImportResult({
         success: false,
         message: 'Error importing data.',

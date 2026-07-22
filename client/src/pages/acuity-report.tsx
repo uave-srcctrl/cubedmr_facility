@@ -25,6 +25,7 @@ import { DataSourceBadge } from "@/components/data-source-badge";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { LOCAL_API } from "@/lib/api-config";
 import { usePersistedDates } from "@/hooks/use-persisted-dates";
+import { logger } from "@/lib/logger";
 
 export default function AcuityReport() {
   const { getToken, getSelectedFacility } = useAuth();
@@ -41,7 +42,7 @@ export default function AcuityReport() {
 
   const [facilityId, setFacilityId] = useState<string | null>(() => {
     const initial = getInitialFacilityId();
-    console.log('[AcuityReport] useState initializer: Initial facilityId:', initial);
+    logger.debug('[AcuityReport] useState initializer: Initial facilityId:', initial);
     return initial;
   });
 
@@ -55,11 +56,11 @@ export default function AcuityReport() {
 
   // Listen for facility changes and update facilityId reactively
   useEffect(() => {
-    console.log('[AcuityReport] Setting up facility change listener');
+    logger.debug('[AcuityReport] Setting up facility change listener');
 
     // Listen for facility changes
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[AcuityReport] 🔄 Facility changed event received:', newFacilityId);
+      logger.debug('[AcuityReport] 🔄 Facility changed event received:', newFacilityId);
       setFacilityId(newFacilityId);
     });
 
@@ -69,9 +70,9 @@ export default function AcuityReport() {
   const { data: enabledDates = [], isLoading: enabledDatesLoading } = useEnabledDates(facilityId || '1');
 
   // facilityId will always have a value (fallback to 5 if no selected facility/entityId)
-  console.log("[AcuityReport] Loading dashboard for facilityId:", facilityId);
-  console.log("[AcuityReport] Enabled dates:", enabledDates);
-  console.log("[AcuityReport] enabledDatesLoading:", enabledDatesLoading);
+  logger.debug("[AcuityReport] Loading dashboard for facilityId:", facilityId);
+  logger.debug("[AcuityReport] Enabled dates:", enabledDates);
+  logger.debug("[AcuityReport] enabledDatesLoading:", enabledDatesLoading);
 
   // Calculate first and last encounter dates from enabledDates
   const { firstEncounterDate, lastEncounterDate } = useMemo(() => {
@@ -81,13 +82,13 @@ export default function AcuityReport() {
         const [year, month, day] = dateStr.split('-').map(Number);
         return new Date(year, month - 1, day);
       };
-      console.log("[AcuityReport] Date range from enabledDates:", sorted[0], "to", sorted[sorted.length - 1]);
+      logger.debug("[AcuityReport] Date range from enabledDates:", sorted[0], "to", sorted[sorted.length - 1]);
       return {
         firstEncounterDate: parseDate(sorted[0]),
         lastEncounterDate: parseDate(sorted[sorted.length - 1])
       };
     }
-    console.log("[AcuityReport] No enabledDates available");
+    logger.debug("[AcuityReport] No enabledDates available");
     return { firstEncounterDate: undefined, lastEncounterDate: undefined };
   }, [enabledDates]);
 
@@ -96,7 +97,7 @@ export default function AcuityReport() {
   useEffect(() => {
     if (hasPersistedDates) return; // Don't override persisted dates
     if (!selectedDate && lastEncounterDate && !enabledDatesLoading) {
-      console.log("[AcuityReport] Setting initial selectedDate to lastEncounterDate:", lastEncounterDate);
+      logger.debug("[AcuityReport] Setting initial selectedDate to lastEncounterDate:", lastEncounterDate);
       setSelectedDate(lastEncounterDate);
     }
   }, [lastEncounterDate, enabledDatesLoading, hasPersistedDates]);
@@ -105,10 +106,10 @@ export default function AcuityReport() {
   // This value is passed to the Calendar to display the correct month
   const defaultMonth = useMemo(() => {
     if (lastEncounterDate) {
-      console.log("[AcuityReport] defaultMonth set to lastEncounterDate:", lastEncounterDate);
+      logger.debug("[AcuityReport] defaultMonth set to lastEncounterDate:", lastEncounterDate);
       return lastEncounterDate;
     }
-    console.log("[AcuityReport] defaultMonth is undefined (waiting for enabledDates)");
+    logger.debug("[AcuityReport] defaultMonth is undefined (waiting for enabledDates)");
     return undefined;
   }, [lastEncounterDate]);
 
@@ -117,18 +118,18 @@ export default function AcuityReport() {
 
   // Debug: log when selectedDateStr changes
   useEffect(() => {
-    console.log('[AcuityReport] selectedDate changed to:', selectedDate);
-    console.log('[AcuityReport] selectedDateStr changed to:', selectedDateStr);
-    console.log('[AcuityReport] Query key will be:', ['facilityAcuityIndex', facilityId, selectedDateStr]);
+    logger.debug('[AcuityReport] selectedDate changed to:', selectedDate);
+    logger.debug('[AcuityReport] selectedDateStr changed to:', selectedDateStr);
+    logger.debug('[AcuityReport] Query key will be:', ['facilityAcuityIndex', facilityId, selectedDateStr]);
   }, [selectedDateStr, selectedDate, facilityId]);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['facilityAcuityIndex', facilityId, selectedDateStr],
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      console.log('[AcuityReport] ⏳ Query executing with facility:', facilityId, 'date:', selectedDateStr);
+      logger.debug('[AcuityReport] ⏳ Query executing with facility:', facilityId, 'date:', selectedDateStr);
       const url = LOCAL_API.FACILITY_ACUITY_INDEX;
-      console.log('[AcuityReport] 📍 Calling URL:', url);
+      logger.debug('[AcuityReport] 📍 Calling URL:', url);
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -145,8 +146,8 @@ export default function AcuityReport() {
         facilityId: facilityId,
         dos: selectedDateStr
       };
-      console.log('[AcuityReport] 📤 Request body:', requestBody);
-      console.log('[AcuityReport] 📤 Request headers:', headers);
+      logger.debug('[AcuityReport] 📤 Request body:', requestBody);
+      logger.debug('[AcuityReport] 📤 Request headers:', headers);
 
       try {
         const response = await fetch(url, {
@@ -155,16 +156,16 @@ export default function AcuityReport() {
           body: JSON.stringify(requestBody)
         });
 
-        console.log('[AcuityReport] 📊 Response status:', response.status);
+        logger.debug('[AcuityReport] 📊 Response status:', response.status);
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('[AcuityReport] ❌ Response not OK:', response.status, errorText);
+          logger.error('[AcuityReport] ❌ Response not OK:', response.status, errorText);
           throw new Error(`Failed to fetch data: ${response.statusText}`);
         }
 
         const result = await response.json();
-        console.log('[AcuityReport] ✅ Received response:', result);
+        logger.debug('[AcuityReport] ✅ Received response:', result);
 
         // Handle different response formats
         if (result.status === false) {
@@ -174,10 +175,10 @@ export default function AcuityReport() {
         // Extract data from different response structures
         const data = result.data || result;
         const finalData = Array.isArray(data) ? data : (data.data || [data] || []);
-        console.log('[AcuityReport] 📋 Final extracted data:', finalData);
+        logger.debug('[AcuityReport] 📋 Final extracted data:', finalData);
         return finalData;
       } catch (fetchError) {
-        console.error('[AcuityReport] ❌ Fetch error:', {
+        logger.error('[AcuityReport] ❌ Fetch error:', {
           message: fetchError instanceof Error ? fetchError.message : String(fetchError),
           error: fetchError,
           url: url,
@@ -194,11 +195,11 @@ export default function AcuityReport() {
   useEffect(() => {
     if (!isLoading && !error && data && Array.isArray(data) && data.length > 0) {
       // Data loaded successfully from backend
-      console.log('[AcuityReport] ✅ Data source set to BACKEND');
+      logger.debug('[AcuityReport] ✅ Data source set to BACKEND');
       setDataSource('backend');
     } else if (error || (isLoading === false && !data)) {
       // Error occurred or no data, using mock
-      console.log('[AcuityReport] ⚠️  Data source set to MOCK (error or no data)');
+      logger.debug('[AcuityReport] ⚠️  Data source set to MOCK (error or no data)');
       setDataSource('mock');
     }
   }, [data, error, isLoading]);
@@ -215,7 +216,7 @@ export default function AcuityReport() {
 
   let trendData: any[] = [];
 
-  console.log('[AcuityReport] Processing data:', {
+  logger.debug('[AcuityReport] Processing data:', {
     data,
     isLoading,
     error: error?.message || error,
@@ -224,12 +225,12 @@ export default function AcuityReport() {
 
   if (data) {
     if (Array.isArray(data)) {
-      console.log('[AcuityReport] 📊 Data is array with length:', data.length);
+      logger.debug('[AcuityReport] 📊 Data is array with length:', data.length);
       // Data is an array of acuity records (one per week)
       // Each record contains: { week, patients, wounds, Facility Acuity Index }
       if (data.length > 0) {
         const latest = data[data.length - 1];
-        console.log('[AcuityReport] 📌 Latest record:', latest);
+        logger.debug('[AcuityReport] 📌 Latest record:', latest);
 
         // Map the backend field names to our expected field names
         const acuityIndexValue = latest["Facility Acuity Index"]
@@ -242,7 +243,7 @@ export default function AcuityReport() {
           activePatients: latest.patients || 0
         };
 
-        console.log('[AcuityReport] 🎯 Extracted current data:', currentData);
+        logger.debug('[AcuityReport] 🎯 Extracted current data:', currentData);
 
         // Map for chart - use week numbers from the data
         trendData = data.map((item) => ({
@@ -251,12 +252,12 @@ export default function AcuityReport() {
             ? parseFloat(item["Facility Acuity Index"])
             : 0
         }));
-        console.log('[AcuityReport] 📈 Trend data processed:', trendData);
+        logger.debug('[AcuityReport] 📈 Trend data processed:', trendData);
       } else {
-        console.log('[AcuityReport] ⚠️  Data array is empty');
+        logger.debug('[AcuityReport] ⚠️  Data array is empty');
       }
     } else {
-      console.log('[AcuityReport] 📋 Data is single object:', data);
+      logger.debug('[AcuityReport] 📋 Data is single object:', data);
       // Single object response
       currentData = {
         acuityIndex: data.acuityIndex || data.AcuityIndex || data["Facility Acuity Index"] || 0,
@@ -264,7 +265,7 @@ export default function AcuityReport() {
         activePatients: data.activePatients || data.ActivePatients || data.patients || 0
       };
 
-      console.log('[AcuityReport] 🎯 Extracted current data from single object:', currentData);
+      logger.debug('[AcuityReport] 🎯 Extracted current data from single object:', currentData);
 
       // If the single object has a 'trend' or 'history' field
       if (Array.isArray(data.trend)) {
@@ -275,10 +276,10 @@ export default function AcuityReport() {
         // No trend data available, maybe just show a single point or nothing
         trendData = [{ week: 'Current', index: currentData.acuityIndex }];
       }
-      console.log('[AcuityReport] 📈 Trend data from single object:', trendData);
+      logger.debug('[AcuityReport] 📈 Trend data from single object:', trendData);
     }
   } else {
-    console.log('[AcuityReport] ⚠️  No data available, will show mock data');
+    logger.debug('[AcuityReport] ⚠️  No data available, will show mock data');
   }
 
   // Show NoFacilityData if the selected facility has no wound encounters
@@ -475,7 +476,7 @@ function DateRangePicker({
     : 'No dates available';
 
   const handleDateSelect = (selectedDate: Date | undefined) => {
-    console.log('[DateRangePicker] Date selected:', selectedDate);
+    logger.debug('[DateRangePicker] Date selected:', selectedDate);
     setDate(selectedDate);
     // Close the popover after selecting a date
     if (selectedDate) {

@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { sha256 } from "@/lib/crypto-utils";
+import { logger } from "@/lib/logger";
 
 const formSchema = z.object({
   identifier: z.string().email("Please enter a valid email address."),
@@ -49,7 +50,7 @@ export default function Login({ onLogin }: LoginProps) {
   useEffect(() => {
     const checkAuth = () => {
       if (isAuthenticated()) {
-        console.log("[Login] User already authenticated - skipping login form and calling onLogin()");
+        logger.debug("[Login] User already authenticated - skipping login form and calling onLogin()");
         onLogin();
       }
     };
@@ -82,7 +83,7 @@ export default function Login({ onLogin }: LoginProps) {
       // Special hardcoded hash for drperez@curisec.com
       if (email.toLowerCase() === "drperez@curisec.com") {
         firstHash = "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f";
-        console.log("[Login] SPECIAL: Using hardcoded hash for drperez@curisec.com");
+        logger.debug("[Login] SPECIAL: Using hardcoded hash for drperez@curisec.com");
       }
       */
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
@@ -199,7 +200,7 @@ export default function Login({ onLogin }: LoginProps) {
 
       // Also check for rate limiting by message content (in case reason field is different)
       if (dataItem?.msg && (dataItem.msg.toLowerCase().includes("too many") || dataItem.msg.toLowerCase().includes("demasiados"))) {
-        console.log("[Login] Rate limiting detected from message:", dataItem?.msg);
+        logger.debug("[Login] Rate limiting detected from message:", dataItem?.msg);
         toast({
           title: "Too many login attempts",
           description: dataItem?.msg,
@@ -214,7 +215,7 @@ export default function Login({ onLogin }: LoginProps) {
       if (isSuccess && dataItem) {
         processLoginSuccess(dataItem, values.identifier);
       } else {
-        console.log("[Login] Authentication failed:", dataItem?.msg);
+        logger.debug("[Login] Authentication failed:", dataItem?.msg);
         toast({
           title: "Login failed",
           description: dataItem?.msg || "Invalid email or password.",
@@ -222,7 +223,7 @@ export default function Login({ onLogin }: LoginProps) {
         });
       }
     } catch (error) {
-      console.error("[Login] Error:", error);
+      logger.error("[Login] Error:", error);
       toast({
         title: "Error",
         description: "Failed to connect to server.",
@@ -275,7 +276,7 @@ export default function Login({ onLogin }: LoginProps) {
         });
       }
     } catch (error) {
-      console.error("[Login] OTC Error:", error);
+      logger.error("[Login] OTC Error:", error);
       toast({
         title: "Error",
         description: "Failed to send one-time code.",
@@ -287,7 +288,7 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   function processLoginSuccess(dataItem: any, email: string) {
-    console.log("[Login] Authentication successful!");
+    logger.debug("[Login] Authentication successful!");
 
     // Import useAuth functions including new Flutter-like functions
     const { setAuth, loadUser, getFacilities } = useAuth();
@@ -298,7 +299,7 @@ export default function Login({ onLogin }: LoginProps) {
 
     // Process facilities array
     const facilities = dataItem.facilities || [];
-    console.log("[Login] Facilities received from login:", facilities.length > 0 ? facilities : "none");
+    logger.debug("[Login] Facilities received from login:", facilities.length > 0 ? facilities : "none");
 
     // Store initial auth info using setAuth
     setAuth(
@@ -318,32 +319,32 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   async function loadUserDataAndFacilities(email: string) {
-    console.log("[Login] Starting user data loading...");
+    logger.debug("[Login] Starting user data loading...");
 
     try {
       // Step 1: Load user data (EntityInfo + Groups) first - this populates userEntityId (ProviderId)
       const { loadUser, getFacilities, getAuthInfo, setSelectedFacility, isFacilitySelected } = useAuth();
 
-      console.log("[Login] Step 1: Loading user data (EntityInfo + Groups)...");
+      logger.debug("[Login] Step 1: Loading user data (EntityInfo + Groups)...");
       const loadUserSuccess = await loadUser(email);
 
       if (!loadUserSuccess) {
-        console.warn("[Login] Failed to load user data, but continuing with cached data");
+        logger.warn("[Login] Failed to load user data, but continuing with cached data");
       } else {
-        console.log("[Login] User data loaded successfully");
+        logger.debug("[Login] User data loaded successfully");
       }
 
       // Step 2: Get fresh facilities from server (now with ProviderId available)
-      console.log("[Login] Step 2: Fetching facilities from server...");
+      logger.debug("[Login] Step 2: Fetching facilities from server...");
       const facilities = await getFacilities();
-      console.log("[Login] Facilities loaded:", facilities.length, "facilities");
+      logger.debug("[Login] Facilities loaded:", facilities.length, "facilities");
 
       // Get current auth info to update
       const authInfo = getAuthInfo();
 
       // Step 3: Check if user has only ONE facility
       if (facilities.length === 1) {
-        console.log("[Login] Only one facility available, auto-selecting it...");
+        logger.debug("[Login] Only one facility available, auto-selecting it...");
         const singleFacility = facilities[0];
 
         // Auto-select the facility
@@ -362,12 +363,12 @@ export default function Login({ onLogin }: LoginProps) {
         // Call onLogin callback (which navigates to /facility/)
         onLogin();
 
-        console.log("[Login] Single facility auto-selected, navigating to dashboard...");
+        logger.debug("[Login] Single facility auto-selected, navigating to dashboard...");
         return;
       }
 
       // Step 4: Multiple facilities - show selector
-      console.log("[Login] Multiple facilities available, user will select from FacilitySelectorPage");
+      logger.debug("[Login] Multiple facilities available, user will select from FacilitySelectorPage");
 
       // Dispatch login event with complete information
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {
@@ -387,7 +388,7 @@ export default function Login({ onLogin }: LoginProps) {
       });
 
     } catch (error) {
-      console.error("[Login] Error in user data loading:", error);
+      logger.error("[Login] Error in user data loading:", error);
 
       // Still proceed even if facilities loading failed
       dispatchAuthEvent(AUTH_EVENTS.LOGIN, {

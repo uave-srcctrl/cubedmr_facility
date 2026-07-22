@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { logger } from "@/lib/logger";
 
 /**
  * Hook that clears authentication data when the LAST tab/window of the domain is closed
@@ -20,7 +21,7 @@ export function useLogoutOnBrowserClose() {
     const sessionMarker = sessionStorage.getItem(SESSION_KEY);
     
     if (!sessionMarker) {
-      console.log('[useLogoutOnBrowserClose] New browser session detected - clearing auth data');
+      logger.debug('[useLogoutOnBrowserClose] New browser session detected - clearing auth data');
       
       // This is a new session (all previous tabs were closed)
       // Clear authentication-related localStorage to require fresh login
@@ -37,9 +38,9 @@ export function useLogoutOnBrowserClose() {
       localStorage.removeItem("userGroups");
       localStorage.removeItem("userName");
       
-      console.log('[useLogoutOnBrowserClose] Auth data cleared for new session');
+      logger.debug('[useLogoutOnBrowserClose] Auth data cleared for new session');
     } else {
-      console.log('[useLogoutOnBrowserClose] Existing session detected - keeping auth data');
+      logger.debug('[useLogoutOnBrowserClose] Existing session detected - keeping auth data');
     }
     
     // Mark that this session has been initialized

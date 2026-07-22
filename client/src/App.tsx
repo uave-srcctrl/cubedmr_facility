@@ -16,6 +16,7 @@ import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { ImportProvider } from "@/contexts/import-context";
 import { EcgLoader } from "@/components/ecg-loader";
 import { RouteErrorBoundary } from "@/components/route-error-boundary";
+import { logger } from "@/lib/logger";
 
 // Lazy load pages for better initial bundle size
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -46,12 +47,12 @@ class ErrorBoundaryComponent extends React.Component<any, any> {
   }
 
   static getDerivedStateFromError(error: any) {
-    console.error('[ErrorBoundary] Caught error:', error);
+    logger.error('[ErrorBoundary] Caught error:', error);
     return { hasError: true, error };
   }
 
   componentDidCatch(error: any, errorInfo: any) {
-    console.error('[ErrorBoundary] Component stack:', errorInfo.componentStack);
+    logger.error('[ErrorBoundary] Component stack:', errorInfo.componentStack);
   }
 
   render() {
@@ -86,7 +87,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
   // redirect to root to ensure they go through facility selector
   useEffect(() => {
     if (isAuthenticated && !wasAuthenticated && !facilitySelected && isAllowedRoute) {
-      console.log('[Router] Fresh login detected on allowed route, redirecting to facility selector');
+      logger.debug('[Router] Fresh login detected on allowed route, redirecting to facility selector');
       setLocation('/');
     }
     if (isAuthenticated) {
@@ -96,13 +97,13 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
     }
   }, [isAuthenticated, facilitySelected, isAllowedRoute, wasAuthenticated, setLocation]);
 
-  console.log('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected, 'location:', location, 'isAllowedRoute:', isAllowedRoute);
+  logger.debug('[Router] Rendering - isAuthenticated:', isAuthenticated, 'facilitySelected:', facilitySelected, 'location:', location, 'isAllowedRoute:', isAllowedRoute);
 
   if (!isAuthenticated) {
-    console.log('[Router] NOT authenticated - showing Login component');
+    logger.debug('[Router] NOT authenticated - showing Login component');
     // Pass a no-op onLogin since App.tsx will detect auth state changes automatically
     return <Login onLogin={() => {
-      console.log("[Router] Login detected, waiting for auth state update...");
+      logger.debug("[Router] Login detected, waiting for auth state update...");
       // App.tsx will automatically detect the auth state change via the interval
     }} />;
   }
@@ -110,13 +111,13 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
   // Si autenticado pero SIN facility seleccionada, mostrar selector
   // EXCEPTO si estamos en una ruta permitida sin facility
   if (!facilitySelected && !isAllowedRoute) {
-    console.log('[Router] Authenticated but no facility selected - showing FacilitySelectorPage');
+    logger.debug('[Router] Authenticated but no facility selected - showing FacilitySelectorPage');
     return <FacilitySelectorPage />;
   }
 
   // If on data-import without facility, render it directly without Layout
   if (!facilitySelected && isAllowedRoute) {
-    console.log('[Router] Authenticated, no facility, but on allowed route - showing DataImportPage');
+    logger.debug('[Router] Authenticated, no facility, but on allowed route - showing DataImportPage');
     return (
       <div className="min-h-screen bg-background py-6 px-[10%]">
         <Suspense fallback={<PageLoader />}>
@@ -126,7 +127,7 @@ function Router({ isAuthenticated, user, onLogout }: { isAuthenticated: boolean;
     );
   }
 
-  console.log('[Router] AUTHENTICATED - showing Dashboard in Layout');
+  logger.debug('[Router] AUTHENTICATED - showing Dashboard in Layout');
   return (
     <Layout user={user} onLogout={onLogout}>
       <Suspense fallback={<PageLoader />}>
@@ -163,31 +164,31 @@ function App() {
   // Enforce only one tab of the application per browser
   const { isActiveTab, showBlockedMessage } = useSingleTabEnforcement();
 
-  console.log('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized, 'isActiveTab:', isActiveTab);
+  logger.debug('[App] App component rendering - isAuth:', isAuth, 'user:', user?.name, 'initialized:', isInitialized, 'isActiveTab:', isActiveTab);
 
   // Initialize auth state on mount
   useEffect(() => {
     const updateAuthState = async () => {
       const authenticated = isAuthenticated();
-      console.log("[App] updateAuthState called - isAuthenticated:", authenticated);
+      logger.debug("[App] updateAuthState called - isAuthenticated:", authenticated);
 
       if (authenticated) {
-        console.log("[App] User is authenticated, loading fresh user data...");
+        logger.debug("[App] User is authenticated, loading fresh user data...");
 
         // Get basic auth info from localStorage first
         const authInfo = getAuthInfo();
         const email = authInfo.email;
 
         if (email) {
-          console.log("[App] Loading user data for:", email);
+          logger.debug("[App] Loading user data for:", email);
 
           // Try to load fresh user data from API (similar to Flutter's loadUser)
           const loadUserSuccess = await loadUser(email);
 
           if (loadUserSuccess) {
-            console.log("[App] User data loaded successfully");
+            logger.debug("[App] User data loaded successfully");
           } else {
-            console.log("[App] Failed to load fresh user data, but continuing with cached data");
+            logger.debug("[App] Failed to load fresh user data, but continuing with cached data");
             // Don't clear auth - use cached data instead
             // This allows the app to work even if the API is temporarily unavailable
           }
@@ -195,15 +196,15 @@ function App() {
           // Try to load facilities (with or without fresh data)
           try {
             const facilities = await getFacilities();
-            console.log("[App] Facilities loaded:", facilities.length, "facilities");
+            logger.debug("[App] Facilities loaded:", facilities.length, "facilities");
           } catch (error) {
-            console.log("[App] Failed to load facilities, continuing with cached:", error);
+            logger.debug("[App] Failed to load facilities, continuing with cached:", error);
             // Continue anyway - use cached facilities if available
           }
 
           // Get current auth info (fresh or cached)
           const currentAuthInfo = getAuthInfo();
-          console.log("[App] Current auth info:", currentAuthInfo);
+          logger.debug("[App] Current auth info:", currentAuthInfo);
 
           // Set auth state with current data (fresh or cached)
           if (currentAuthInfo.token && currentAuthInfo.email) {
@@ -214,25 +215,25 @@ function App() {
               email: currentAuthInfo.email,
               entityId: currentAuthInfo.entityId,
             });
-            console.log("[App] Auth state set with user:", currentAuthInfo.email);
+            logger.debug("[App] Auth state set with user:", currentAuthInfo.email);
           } else {
-            console.log("[App] No token or email in auth info, clearing auth");
+            logger.debug("[App] No token or email in auth info, clearing auth");
             setIsAuth(false);
             setUser(null);
           }
         } else {
-          console.log("[App] No email found in localStorage, user not authenticated");
+          logger.debug("[App] No email found in localStorage, user not authenticated");
           setIsAuth(false);
           setUser(null);
         }
       } else {
-        console.log("[App] isAuthenticated is false - checking localStorage...");
+        logger.debug("[App] isAuthenticated is false - checking localStorage...");
         const token = localStorage.getItem("authToken");
         const email = localStorage.getItem("userEmail");
-        console.log("[App] localStorage - token:", token ? "present" : "missing", "email:", email ? "present" : "missing");
+        logger.debug("[App] localStorage - token:", token ? "present" : "missing", "email:", email ? "present" : "missing");
         setIsAuth(false);
         setUser(null);
-        console.log("[App] Auth cleared");
+        logger.debug("[App] Auth cleared");
       }
 
       // Mark app as initialized
@@ -244,28 +245,28 @@ function App() {
 
     // Listen for custom auth events from login/logout
     const unsubscribeLogin = onAuthEvent(AUTH_EVENTS.LOGIN, (detail) => {
-      console.log("[App] LOGIN event received - triggering updateAuthState");
+      logger.debug("[App] LOGIN event received - triggering updateAuthState");
       // Small delay to ensure localStorage is synchronized
       setTimeout(() => {
-        console.log("[App] LOGIN event - 100ms delay passed, calling updateAuthState");
+        logger.debug("[App] LOGIN event - 100ms delay passed, calling updateAuthState");
         updateAuthState();
       }, 100);
     });
 
     const unsubscribeLogout = onAuthEvent(AUTH_EVENTS.LOGOUT, (detail) => {
-      console.log("[App] LOGOUT event received - triggering updateAuthState");
+      logger.debug("[App] LOGOUT event received - triggering updateAuthState");
       updateAuthState();
     });
 
     const unsubscribeFacilityChanged = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (facilityId) => {
-      console.log("[App] FACILITY_CHANGED event received - facilityId:", facilityId);
+      logger.debug("[App] FACILITY_CHANGED event received - facilityId:", facilityId);
       // Force a re-render to update facilitySelected state in Router
       updateAuthState();
     });
 
     // Also listen for storage changes (for other tabs)
     const handleStorageChange = () => {
-      console.log("[App] Storage event fired - checking if auth changed");
+      logger.debug("[App] Storage event fired - checking if auth changed");
       setTimeout(() => {
         updateAuthState();
       }, 100);
@@ -285,20 +286,20 @@ function App() {
   useLogoutOnUnload();
 
   const handleLogout = async () => {
-    console.log("[App] handleLogout() called - current isAuth:", isAuth);
+    logger.debug("[App] handleLogout() called - current isAuth:", isAuth);
     try {
-      console.log("[App] Calling logout()...");
+      logger.debug("[App] Calling logout()...");
       await logout();
-      console.log("[App] logout() completed successfully");
+      logger.debug("[App] logout() completed successfully");
     } catch (error) {
-      console.error("[App] Logout error:", error);
+      logger.error("[App] Logout error:", error);
     }
 
-    console.log("[App] handleLogout() - manually setting state to logged out");
+    logger.debug("[App] handleLogout() - manually setting state to logged out");
     // Clear local state - App will detect the change via logout event
     setIsAuth(false);
     setUser(null);
-    console.log("[App] handleLogout() - state cleared, should show login page now");
+    logger.debug("[App] handleLogout() - state cleared, should show login page now");
   };
 
   return (
@@ -361,14 +362,14 @@ function App() {
               <>
                 {isAuth && user ? (
                   <>
-                    {console.log('[App] Rendering Router with isAuth=true, user=', user.name)}
+                    {logger.debug('[App] Rendering Router with isAuth=true, user=', user.name)}
                     <Router isAuthenticated={true} user={user} onLogout={handleLogout} />
                   </>
                 ) : (
                   <>
-                    {console.log('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
+                    {logger.debug('[App] Rendering Login - isAuth=', isAuth, ', user=', user)}
                     <Login onLogin={() => {
-                      console.log("[App] Login successful, waiting for auth state update...");
+                      logger.debug("[App] Login successful, waiting for auth state update...");
                     }} />
                   </>
                 )}

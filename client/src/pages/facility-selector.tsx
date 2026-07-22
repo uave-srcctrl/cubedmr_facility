@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { FacilitySelector } from "@/components/facility-selector";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
+import { logger } from "@/lib/logger";
 
 interface Facility {
   id: string;
@@ -34,21 +35,21 @@ export default function FacilitySelectorPage() {
   useEffect(() => {
     const loadFacilities = async () => {
       try {
-        console.log("[FacilitySelectorPage] 📤 Iniciando petición a getFacilities()...");
-        console.log("[FacilitySelectorPage] ⏱️  Timestamp:", new Date().toISOString());
+        logger.debug("[FacilitySelectorPage] 📤 Iniciando petición a getFacilities()...");
+        logger.debug("[FacilitySelectorPage] ⏱️  Timestamp:", new Date().toISOString());
         
         // Llamar a getFacilities() que hace petición al servidor
         const fetchedFacilities = await getFacilities();
         
-        console.log("\n" + "=".repeat(80));
-        console.log("[FacilitySelectorPage] 📥 RESULTADO DE getFacilities()");
-        console.log("=".repeat(80));
-        console.log(`Total facilities recibidas: ${fetchedFacilities?.length || 0}`);
-        console.log("Datos completos:", fetchedFacilities);
-        console.log("=".repeat(80) + "\n");
+        logger.debug("\n" + "=".repeat(80));
+        logger.debug("[FacilitySelectorPage] 📥 RESULTADO DE getFacilities()");
+        logger.debug("=".repeat(80));
+        logger.debug(`Total facilities recibidas: ${fetchedFacilities?.length || 0}`);
+        logger.debug("Datos completos:", fetchedFacilities);
+        logger.debug("=".repeat(80) + "\n");
         
         if (!fetchedFacilities || fetchedFacilities.length === 0) {
-          console.warn("[FacilitySelectorPage] ⚠️  ADVERTENCIA: No se recibieron facilities del servidor");
+          logger.warn("[FacilitySelectorPage] ⚠️  ADVERTENCIA: No se recibieron facilities del servidor");
           setError("No facilities available. Please contact your administrator.");
           setIsLoading(false);
           return;
@@ -67,7 +68,7 @@ export default function FacilitySelectorPage() {
             ...facility
           };
           
-          console.log(`[FacilitySelectorPage] Facility ${idx + 1}:`, {
+          logger.debug(`[FacilitySelectorPage] Facility ${idx + 1}:`, {
             id: mapped.id,
             name: mapped.name,
             acuity_level: mapped.acuity_level,
@@ -84,7 +85,7 @@ export default function FacilitySelectorPage() {
         const uniqueFacilities = mappedFacilities.filter((facility: any) => {
           const id = String(facility.id);
           if (seen.has(id)) {
-            console.log(`[FacilitySelectorPage] ⚠️ Duplicate facility removed: ${facility.name} (ID: ${id})`);
+            logger.debug(`[FacilitySelectorPage] ⚠️ Duplicate facility removed: ${facility.name} (ID: ${id})`);
             return false;
           }
           seen.add(id);
@@ -92,15 +93,15 @@ export default function FacilitySelectorPage() {
         });
         
         if (uniqueFacilities.length !== mappedFacilities.length) {
-          console.warn(`[FacilitySelectorPage] ⚠️ Removed ${mappedFacilities.length - uniqueFacilities.length} duplicate facilities`);
+          logger.warn(`[FacilitySelectorPage] ⚠️ Removed ${mappedFacilities.length - uniqueFacilities.length} duplicate facilities`);
         }
         
-        console.log(`[FacilitySelectorPage] ✅ Facilities mapeadas exitosamente: ${uniqueFacilities.length} facilities`);
+        logger.debug(`[FacilitySelectorPage] ✅ Facilities mapeadas exitosamente: ${uniqueFacilities.length} facilities`);
         setFacilities(uniqueFacilities);
         setError(null);
         setIsLoading(false);
       } catch (err) {
-        console.error("[FacilitySelectorPage] ❌ ERROR al cargar facilities:", {
+        logger.error("[FacilitySelectorPage] ❌ ERROR al cargar facilities:", {
           message: (err as Error).message,
           stack: (err as Error).stack,
           error: err
@@ -115,7 +116,7 @@ export default function FacilitySelectorPage() {
 
   const handleSelectFacility = (facilityId: string) => {
     try {
-      console.log("[FacilitySelectorPage] Selecting facility:", facilityId);
+      logger.debug("[FacilitySelectorPage] Selecting facility:", facilityId);
       
       // Guardar facility seleccionada
       setSelectedFacility(facilityId);
@@ -123,37 +124,37 @@ export default function FacilitySelectorPage() {
       // Validar que se guardó correctamente
       const selectedId = getSelectedFacility();
       if (selectedId === facilityId) {
-        console.log(`[FacilitySelectorPage] ✅ Successfully selected facility: ${facilityId}`);
+        logger.debug(`[FacilitySelectorPage] ✅ Successfully selected facility: ${facilityId}`);
         
         // Esperar un poco antes de navegar para asegurar que el estado se actualice
         setTimeout(() => {
-          console.log("[FacilitySelectorPage] 🚀 Navigating to dashboard...");
+          logger.debug("[FacilitySelectorPage] 🚀 Navigating to dashboard...");
           navigate("/facility/");
         }, 100);
       } else {
-        console.error("[FacilitySelectorPage] ❌ Failed to select facility. Selected ID:", selectedId, "Expected:", facilityId);
+        logger.error("[FacilitySelectorPage] ❌ Failed to select facility. Selected ID:", selectedId, "Expected:", facilityId);
         setError("Failed to select facility. Please try again.");
       }
     } catch (err) {
-      console.error("[FacilitySelectorPage] ❌ Error selecting facility:", err);
+      logger.error("[FacilitySelectorPage] ❌ Error selecting facility:", err);
       setError("An error occurred while selecting the facility.");
     }
   };
 
   const handleLogout = async () => {
     try {
-      console.log("[FacilitySelectorPage] Logout iniciado");
+      logger.debug("[FacilitySelectorPage] Logout iniciado");
       await logout();
-      console.log("[FacilitySelectorPage] Logout completado, navegando a login");
+      logger.debug("[FacilitySelectorPage] Logout completado, navegando a login");
       navigate("/");
     } catch (err) {
-      console.error("[FacilitySelectorPage] Error al hacer logout:", err);
+      logger.error("[FacilitySelectorPage] Error al hacer logout:", err);
       setError("An error occurred while logging out.");
     }
   };
 
   const handleImportData = () => {
-    console.log("[FacilitySelectorPage] Navigating to import without facility selection");
+    logger.debug("[FacilitySelectorPage] Navigating to import without facility selection");
     navigate("/facility/data-import");
   };
 

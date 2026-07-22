@@ -32,9 +32,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { onAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { usePersistedDates } from "@/hooks/use-persisted-dates";
+import { logger } from "@/lib/logger";
 
 export default function Dashboard() {
-  console.log('[Dashboard] 🎯 Dashboard component mounted!');
+  logger.debug('[Dashboard] 🎯 Dashboard component mounted!');
 
   const { getAuthInfo, getToken, getSelectedFacility } = useAuth();
   const authInfo = getAuthInfo();
@@ -44,10 +45,10 @@ export default function Dashboard() {
 
   // Listen for facility changes
   useEffect(() => {
-    console.log('[Dashboard] Setting up facility change listener');
+    logger.debug('[Dashboard] Setting up facility change listener');
 
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[Dashboard] 🔄 Facility changed event received:', newFacilityId);
+      logger.debug('[Dashboard] 🔄 Facility changed event received:', newFacilityId);
       setSelectedFacilityId(newFacilityId);
     });
 
@@ -60,8 +61,8 @@ export default function Dashboard() {
   // Check if facility has wound encounter data
   const { hasData: facilityHasData, facilityName } = useFacilityHasData();
 
-  console.log('[Dashboard] Initial authInfo from hook:', authInfo);
-  console.log('[Dashboard] Selected facility ID:', selectedFacilityId);
+  logger.debug('[Dashboard] Initial authInfo from hook:', authInfo);
+  logger.debug('[Dashboard] Selected facility ID:', selectedFacilityId);
 
   // Use state and effect to ensure token is available after mount
   const [token, setToken] = useState<string | null>(null);
@@ -74,8 +75,8 @@ export default function Dashboard() {
       const authToken = getToken();
       setToken(authToken);
       setTokenReady(true);
-      console.log('[Dashboard] ✅ Token ready from localStorage:', authToken ? `present (${authToken.substring(0, 20)}...)` : 'MISSING ⚠️');
-      console.log('[Dashboard] Auth info:', authInfo);
+      logger.debug('[Dashboard] ✅ Token ready from localStorage:', authToken ? `present (${authToken.substring(0, 20)}...)` : 'MISSING ⚠️');
+      logger.debug('[Dashboard] Auth info:', authInfo);
     }, 200);  // Increased from 50ms to 200ms
 
     return () => clearTimeout(timer);
@@ -152,7 +153,7 @@ export default function Dashboard() {
 
   // Debug: log enabledDates state
   useEffect(() => {
-    console.log('[Dashboard] enabledDates state:', {
+    logger.debug('[Dashboard] enabledDates state:', {
       loading: enabledDatesLoading,
       error: enabledDatesError?.message,
       count: enabledDates.length,
@@ -225,7 +226,7 @@ export default function Dashboard() {
         const date = new Date(dateValue as any);
         return isNaN(date.getTime()) ? null : date;
       } catch (e) {
-        console.warn('[Dashboard] Failed to parse date:', dateValue, e);
+        logger.warn('[Dashboard] Failed to parse date:', dateValue, e);
         return null;
       }
     };
@@ -282,7 +283,7 @@ export default function Dashboard() {
 
   // Initialize dates when enabled dates load (only if no persisted dates)
   useEffect(() => {
-    console.log('[Dashboard] Date init effect:', {
+    logger.debug('[Dashboard] Date init effect:', {
       hasPersistedDates,
       enabledDatesCount: enabledDates.length,
       startDate: startDate?.toISOString(),
@@ -290,13 +291,13 @@ export default function Dashboard() {
     });
 
     if (hasPersistedDates) {
-      console.log('[Dashboard] ⏭️ Skipping date init - has persisted dates');
+      logger.debug('[Dashboard] ⏭️ Skipping date init - has persisted dates');
       return;
     }
 
     // Wait until enabledDates are loaded
     if (enabledDates.length === 0) {
-      console.log('[Dashboard] ⏳ Waiting for enabledDates to load...');
+      logger.debug('[Dashboard] ⏳ Waiting for enabledDates to load...');
       return;
     }
 
@@ -305,7 +306,7 @@ export default function Dashboard() {
     const lastDateValue = sorted[sorted.length - 1];
     if (!lastDateValue) return;
 
-    console.log('[Dashboard] lastDateValue type:', typeof lastDateValue, 'value:', lastDateValue);
+    logger.debug('[Dashboard] lastDateValue type:', typeof lastDateValue, 'value:', lastDateValue);
 
     let computedLastDate: Date;
     if (typeof lastDateValue === 'string') {
@@ -318,14 +319,14 @@ export default function Dashboard() {
 
     if (isNaN(computedLastDate.getTime())) return;
 
-    console.log('[Dashboard] ✅ enabledDates loaded, last date:', computedLastDate);
+    logger.debug('[Dashboard] ✅ enabledDates loaded, last date:', computedLastDate);
 
     if (!endDate) {
-      console.log('[Dashboard] ✅ Setting endDate to:', computedLastDate);
+      logger.debug('[Dashboard] ✅ Setting endDate to:', computedLastDate);
       setEndDate(computedLastDate);
     }
     if (!startDate) {
-      console.log('[Dashboard] ✅ Setting startDate to:', computedLastDate);
+      logger.debug('[Dashboard] ✅ Setting startDate to:', computedLastDate);
       setStartDate(computedLastDate);
     }
   }, [enabledDates, hasPersistedDates, startDate, endDate, setStartDate, setEndDate]);
@@ -341,13 +342,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!tokenReady) {
-      console.log('[Dashboard] Waiting for token to be ready...');
+      logger.debug('[Dashboard] Waiting for token to be ready...');
       return; // Don't fetch until token is ready
     }
 
     // Wait for dates to be initialized
     if (!startDateStr || !endDateStr) {
-      console.log('[Dashboard] Waiting for dates to be initialized...');
+      logger.debug('[Dashboard] Waiting for dates to be initialized...');
       return;
     }
 
@@ -356,14 +357,14 @@ export default function Dashboard() {
       try {
         const facilityId = selectedFacilityId;
         if (!facilityId) {
-          console.warn('[Dashboard] No facilityId found');
+          logger.warn('[Dashboard] No facilityId found');
           setDashboardKPIs(null);
           setKpisSource('no-data');
           setLoading(false);
           return;
         }
 
-        console.log('[Dashboard/KPIs] Fetching with selectedFacilityId:', facilityId, 'dates:', startDateStr, '-', endDateStr);
+        logger.debug('[Dashboard/KPIs] Fetching with selectedFacilityId:', facilityId, 'dates:', startDateStr, '-', endDateStr);
 
         // Fetch KPIs via PHP API with date fallback (tries wider ranges if no data)
         const result = await fetchWithDateFallback({
@@ -422,7 +423,7 @@ export default function Dashboard() {
           setKpisError('No KPI data available');
         }
       } catch (error) {
-        console.error('[Dashboard] Error fetching KPIs:', error);
+        logger.error('[Dashboard] Error fetching KPIs:', error);
         setDashboardKPIs(null);
         setKpisSource('no-data');
         setKpisError('Failed to load KPI data');
@@ -593,7 +594,7 @@ export default function Dashboard() {
         const facilityId = authInfo.facilityId;
 
         if (!facilityId) {
-          console.warn('[Dashboard] No facilityId for wounds by status');
+          logger.warn('[Dashboard] No facilityId for wounds by status');
           setWoundsByStatusDataState([]);
           setWoundsByStatusSource('no-data');
           setWoundsByStatusLoading(false);
@@ -601,7 +602,7 @@ export default function Dashboard() {
         }
 
         // Fetch wounds by status directly from PHP API
-        console.log('[Dashboard] Fetching wounds by status for facility:', facilityId);
+        logger.debug('[Dashboard] Fetching wounds by status for facility:', facilityId);
 
         const result = await fetchFromPhpApi("rptWoundsByStatus", {
           facilityId: facilityId,
@@ -613,12 +614,12 @@ export default function Dashboard() {
           deviceId: "dashboard-wounds-by-status",
         });
 
-        console.log('[Dashboard] Wounds by status result:', result);
+        logger.debug('[Dashboard] Wounds by status result:', result);
 
         if (result?.status && Array.isArray(result.data) && result.data.length > 0) {
           const transformed = transformToWoundsByStatusFormat(result);
           if (transformed.status && Array.isArray(transformed.data) && transformed.data.length > 0) {
-            console.log('[Dashboard] Loaded wounds by status data:', transformed.data);
+            logger.debug('[Dashboard] Loaded wounds by status data:', transformed.data);
             setWoundsByStatusDataState(transformed.data);
             setWoundsByStatusSource('backend');
           } else {
@@ -626,17 +627,17 @@ export default function Dashboard() {
             setWoundsByStatusSource('no-data');
           }
         } else if (result?.status === false) {
-          console.log('[Dashboard] Backend error:', result?.error);
+          logger.debug('[Dashboard] Backend error:', result?.error);
           setWoundsByStatusDataState([]);
           setWoundsByStatusSource('mock');
         } else {
-          console.log('[Dashboard] No wounds by status data available from backend');
+          logger.debug('[Dashboard] No wounds by status data available from backend');
           setWoundsByStatusDataState([]);
           setWoundsByStatusSource('no-data');
         }
       } catch (error) {
         // Network error or other exception
-        console.error('[Dashboard] Error fetching wounds by status from report API:', error);
+        logger.error('[Dashboard] Error fetching wounds by status from report API:', error);
         setWoundsByStatusDataState([]);
         setWoundsByStatusSource('mock');
       } finally {
@@ -646,7 +647,7 @@ export default function Dashboard() {
     };
 
     if (!tokenReady) {
-      console.log('[Dashboard] Wounds by Status: Waiting for token to be ready');
+      logger.debug('[Dashboard] Wounds by Status: Waiting for token to be ready');
       return;
     }
     fetchWoundsByStatusData();

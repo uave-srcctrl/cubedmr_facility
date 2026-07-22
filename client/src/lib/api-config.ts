@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * API Configuration
  * Centralized configuration for all API endpoints
@@ -20,7 +21,7 @@ const REMOTE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL_REMOTE || 'https://c
 const DEBUG_API = import.meta.env.VITE_DEBUG_API === 'true';
 
 if (DEBUG_API) {
-  console.log('[API Config] PHP API base:', PHP_API_BASE);
+  logger.debug('[API Config] PHP API base:', PHP_API_BASE);
 }
 
 /**

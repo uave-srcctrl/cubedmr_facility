@@ -1,15 +1,16 @@
 import { QueryClient, QueryFunction, QueryCache, MutationCache } from "@tanstack/react-query";
+import { logger } from "@/lib/logger";
 
 /**
  * Global error handler for queries and mutations
  * Logs errors and can be extended to show toast notifications
  */
 function handleQueryError(error: unknown, context?: unknown): void {
-  console.error('[QueryClient] Error:', error);
+  logger.error('[QueryClient] Error:', error);
   
   // Check for authentication errors
   if (error instanceof Error && error.message.includes('401')) {
-    console.warn('[QueryClient] Authentication error detected');
+    logger.warn('[QueryClient] Authentication error detected');
     // Could dispatch auth event here if needed
   }
 }

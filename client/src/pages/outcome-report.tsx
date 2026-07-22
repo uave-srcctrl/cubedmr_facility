@@ -24,6 +24,7 @@ import { useFacilityHasData } from "@/hooks/use-facility-has-data";
 import { EcgLoader } from "@/components/ecg-loader";
 import { REMOTE_API, getFacilityId } from "@/lib/api-config";
 import { normalizeFieldNames } from "@/lib/field-mapper";
+import { logger } from "@/lib/logger";
 
 export default function OutcomeReportGlobal() {
   const { getAuthInfo, getSelectedFacility } = useAuth();
@@ -46,7 +47,7 @@ export default function OutcomeReportGlobal() {
   // Listen for facility changes
   useEffect(() => {
     const unsubscribe = onAuthEvent(AUTH_EVENTS.FACILITY_CHANGED, (newFacilityId: string) => {
-      console.log('[OutcomeReport] 🔄 Facility changed:', newFacilityId);
+      logger.debug('[OutcomeReport] 🔄 Facility changed:', newFacilityId);
       setFacilityId(newFacilityId);
       setDatesInitialized(false); // Reset dates initialization when facility changes
     });
@@ -73,7 +74,7 @@ export default function OutcomeReportGlobal() {
   // Set initial dates from enabledDates (both start and end = most recent encounter)
   useEffect(() => {
     if (!enabledDatesLoading && lastEncounterDate && !datesInitialized) {
-      console.log('[OutcomeReport] Setting date range to most recent:', lastEncounterDate);
+      logger.debug('[OutcomeReport] Setting date range to most recent:', lastEncounterDate);
       setStartDate(lastEncounterDate);
       setEndDate(lastEncounterDate);
       setDatesInitialized(true);

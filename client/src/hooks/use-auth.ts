@@ -2,6 +2,7 @@ import { LOCAL_API } from "@/lib/api-config";
 import { dispatchAuthEvent, AUTH_EVENTS } from "@/lib/auth-events";
 import { secureStorageSync } from "@/lib/secure-storage";
 import { sha256 } from "@/lib/crypto-utils";
+import { logger } from "@/lib/logger";
 
 interface Facility {
   id: string;
@@ -198,7 +199,7 @@ export function useAuth() {
         // No token/email - skip server logout
       }
     } catch (error) {
-      console.error("[Auth] Logout error");
+      logger.error("[Auth] Logout error");
     } finally {
       // Calling clearAuth
       clearAuth();
@@ -293,7 +294,7 @@ export function useAuth() {
       });
 
       if (!entityInfoResponse.ok) {
-        console.error('[useAuth] EntityInfo request failed:', entityInfoResponse.status);
+        logger.error('[useAuth] EntityInfo request failed:', entityInfoResponse.status);
         return false;
       }
 
@@ -347,7 +348,7 @@ export function useAuth() {
       });
 
       if (!groupsResponse.ok) {
-        console.error('[useAuth] GroupsByUser request failed:', groupsResponse.status);
+        logger.error('[useAuth] GroupsByUser request failed:', groupsResponse.status);
         return false;
       }
 
@@ -396,7 +397,7 @@ export function useAuth() {
       // loadUser completed
       return true;
     } catch (error) {
-      console.error('[useAuth] loadUser error');
+      logger.error('[useAuth] loadUser error');
       return false;
     }
   }
@@ -411,7 +412,7 @@ export function useAuth() {
       // PHI logging removed for HIPAA compliance
 
       if (!token || !email) {
-        console.error("[useAuth] getFacilities: Missing auth credentials");
+        logger.error("[useAuth] getFacilities: Missing auth credentials");
         return [];
       }
 
@@ -471,7 +472,7 @@ export function useAuth() {
       // Performance logging removed for HIPAA compliance
 
       if (!response.ok) {
-        console.error("[useAuth] getFacilities request failed:", response.status);
+        logger.error("[useAuth] getFacilities request failed:", response.status);
         return [];
       }
 
@@ -480,7 +481,7 @@ export function useAuth() {
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error("[useAuth] getFacilities JSON parse error");
+        logger.error("[useAuth] getFacilities JSON parse error");
         return [];
       }
 
@@ -548,7 +549,7 @@ export function useAuth() {
       // PHI logging removed for HIPAA compliance
       return [];
     } catch (error) {
-      console.error("[useAuth] getFacilities error");
+      logger.error("[useAuth] getFacilities error");
       return [];
     }
   }

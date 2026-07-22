@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 ﻿import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -256,7 +257,7 @@ export default function SettingsPage() {
           description: 'Changes applied immediately.',
         });
       } catch (error) {
-        console.error('[Settings] Auto-save failed:', error);
+        logger.error('[Settings] Auto-save failed:', error);
         setHasChanges(true);
       }
     } else {

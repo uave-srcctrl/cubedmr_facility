@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 "use client"
 
 import * as React from "react"
@@ -37,7 +38,7 @@ function Calendar({
   // Update month when defaultMonth changes (important for date picker behavior)
   React.useEffect(() => {
     if (defaultMonth) {
-      console.log('[Calendar] defaultMonth changed, updating internal month to:', defaultMonth);
+      logger.debug('[Calendar] defaultMonth changed, updating internal month to:', defaultMonth);
       setMonth(defaultMonth);
     }
   }, [defaultMonth]);

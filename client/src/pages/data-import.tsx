@@ -42,6 +42,7 @@ import { useImport } from '@/contexts/import-context';
 import { createSampleExcel, validateExcelData, remapExcelColumns } from '@/lib/excel-utils';
 import { dispatchAuthEvent, AUTH_EVENTS } from '@/lib/auth-events';
 import { secureStorageSync } from '@/lib/secure-storage';
+import { logger } from "@/lib/logger";
 
 interface ImportRow {
   [key: string]: any;
@@ -476,7 +477,7 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['import-logs'] });
       queryClient.invalidateQueries({ queryKey: ['import-stats'] });
       // Refresh facilities first to update total_wound_encounters count
-      await getFacilities().catch(console.error);
+      await getFacilities().catch(logger.error);
       // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
@@ -865,7 +866,7 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['import-logs'] });
       queryClient.invalidateQueries({ queryKey: ['import-stats'] });
       // Refresh facilities first to update total_wound_encounters count
-      await getFacilities().catch(console.error);
+      await getFacilities().catch(logger.error);
       // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
     }
@@ -1041,7 +1042,7 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['import-logs'] });
       queryClient.invalidateQueries({ queryKey: ['import-stats'] });
       // Refresh facilities first to update total_wound_encounters count
-      await getFacilities().catch(console.error);
+      await getFacilities().catch(logger.error);
       // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
@@ -1174,7 +1175,7 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['import-logs'] });
       queryClient.invalidateQueries({ queryKey: ['import-stats'] });
       // Refresh facilities first to update total_wound_encounters count
-      await getFacilities().catch(console.error);
+      await getFacilities().catch(logger.error);
       // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 
@@ -1279,7 +1280,7 @@ export default function DataImportPage() {
       queryClient.invalidateQueries({ queryKey: ['import-logs'] });
       queryClient.invalidateQueries({ queryKey: ['import-stats'] });
       // Refresh facilities first to update total_wound_encounters count
-      await getFacilities().catch(console.error);
+      await getFacilities().catch(logger.error);
       // Then dispatch event so pages know to refresh (after facilities are updated)
       dispatchAuthEvent(AUTH_EVENTS.DATA_IMPORTED);
 

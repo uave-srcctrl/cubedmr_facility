@@ -2,6 +2,7 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCcw, Home } from "lucide-react";
+import { logger } from "@/lib/logger";
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -34,8 +35,8 @@ export class RouteErrorBoundary extends React.Component<ErrorBoundaryProps, Erro
     this.setState({ errorInfo });
     
     // Log error for debugging (removed in production by vite config)
-    console.error('[RouteErrorBoundary] Error caught:', error);
-    console.error('[RouteErrorBoundary] Component stack:', errorInfo.componentStack);
+    logger.error('[RouteErrorBoundary] Error caught:', error);
+    logger.error('[RouteErrorBoundary] Component stack:', errorInfo.componentStack);
   }
 
   handleReset = (): void => {
