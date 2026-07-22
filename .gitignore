@@ -18,4 +18,6 @@ nohup.out
 
 # Environment
 .env
+.env.*
+!.env.example
 tests/results.json
