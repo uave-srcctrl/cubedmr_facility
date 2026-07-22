@@ -10,6 +10,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { DateRangePicker } from "./facility-wound-report.date-range-picker";
+import { WoundReportKPIs } from "./facility-wound-report.kpis";
+import { AcuityTrendChart } from "./facility-wound-report.acuity-chart";
+import { PushScoreChart } from "./facility-wound-report.push-chart";
+import { WoundReportDataTables } from "./facility-wound-report.data-tables";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -478,443 +483,55 @@ export default function FacilityWoundReport() {
           ) : (
             <div className="space-y-6">
               {/* KPI Cards - Row 1 */}
-              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-                {/* Avg Wound Reduction KPI */}
-                {isComponentEnabled('facility-report', 'card-avg-wound-reduction') && (
-                  <Card className="border-l-4 border-l-blue-500 shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Avg Wound Reduction</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 && data[0]?.['Average Percentage Wound Area Reduction'] ? (
-                        <div>
-                          <div className="text-3xl font-bold text-blue-600">
-                            {(parseFloat(data[0]['Average Percentage Wound Area Reduction']) * 100).toFixed(1)}%
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">Monthly area reduction</p>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground text-sm">No data available</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Wounds Improving KPI */}
-                {isComponentEnabled('facility-report', 'card-wounds-improving') && (
-                  <Card className="border-l-4 border-l-green-500 shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Wounds Improving</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 && data[0]?.['Percent of Wounds Improving'] != null ? (
-                        <div>
-                          <div className="text-3xl font-bold text-green-600">
-                            {Math.round(parseFloat(data[0]['Percent of Wounds Improving']) * (data[0]['Number of Active Wounds'] || 0))}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">Of {data[0]['Number of Active Wounds'] || 0} active wounds</p>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground text-sm">No data available</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Wounds Deteriorating KPI */}
-                {isComponentEnabled('facility-report', 'card-wounds-deteriorating') && (
-                  <Card
-                    className="border-l-4 border-l-red-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                    onClick={() => {
-                      setDeterioratingModalOpen(true);
-                      refetchDeteriorating();
-                    }}
-                  >
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Wounds Deteriorating</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 && data[0]?.['Percent of Wounds Deteriorating'] != null ? (
-                        <div>
-                          <div className="text-3xl font-bold text-red-600">
-                            {Math.round(parseFloat(data[0]['Percent of Wounds Deteriorating']) * (data[0]['Number of Active Wounds'] || 0))}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">wounds with increased area</p>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground text-sm">No data available</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Wounds Stable KPI */}
-                {isComponentEnabled('facility-report', 'card-wounds-stable') && (
-                  <Card className="border-l-4 border-l-yellow-500 shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Wounds Stable</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 && data[0]?.['Percent of Wounds Stable'] != null ? (
-                        <div>
-                          <div className="text-3xl font-bold text-yellow-600">
-                            {Math.round(parseFloat(data[0]['Percent of Wounds Stable']) * (data[0]['Number of Active Wounds'] || 0))}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">Of {data[0]['Number of Active Wounds'] || 0} active wounds</p>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground text-sm">No data available</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Facility Acuity Index KPI */}
-                {isComponentEnabled('facility-report', 'card-acuity-index') && (
-                  <Card className="border-l-4 border-l-purple-500 shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Facility Acuity Index</CardTitle>
-                      <Stethoscope className="h-4 w-4 text-purple-500" />
-                    </CardHeader>
-                    <CardContent>
-                      {acuityIndexLoading ? (
-                        <div className="text-muted-foreground text-sm">Loading...</div>
-                      ) : currentAcuityIndex !== null ? (
-                        <div>
-                          <div className="text-3xl font-bold text-purple-600">
-                            {currentAcuityIndex.toFixed(1)}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">Wounds per patient</p>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground text-sm">No data available</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Chronic Wounds KPI */}
-                {isComponentEnabled('facility-report', 'card-chronic-wounds') && (
-                  <Card
-                    className="border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950/20"
-                    onClick={() => {
-                      setChronicWoundsModalOpen(true);
-                      refetchChronicWounds();
-                    }}
-                  >
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Chronic Wounds</CardTitle>
-                      <Clock className="h-4 w-4 text-orange-500" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-bold text-orange-600">
-                        {chronicWoundsLoading ? '...' : chronicWoundsData?.total_wounds ?? 0}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2">wounds older than 100 days</p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
+              <WoundReportKPIs
+                isComponentEnabled={isComponentEnabled}
+                data={data}
+                setDeterioratingModalOpen={setDeterioratingModalOpen}
+                refetchDeteriorating={refetchDeteriorating}
+                acuityIndexLoading={acuityIndexLoading}
+                currentAcuityIndex={currentAcuityIndex}
+                setChronicWoundsModalOpen={setChronicWoundsModalOpen}
+                refetchChronicWounds={refetchChronicWounds}
+                chronicWoundsLoading={chronicWoundsLoading}
+                chronicWoundsData={chronicWoundsData}
+              />
 
               {/* Acuity Index Trend Chart */}
               {isComponentEnabled('facility-report', 'chart-acuity-trend') && (
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-3">
-                    <div className="flex flex-col gap-0.5">
-                      <CardTitle className="text-base">Acuity Index Trend</CardTitle>
-                      <CardDescription className="text-xs">
-                        {useAcuityDateRangeMode
-                          ? `Date range: ${startDateStr} to ${endDateStr}`
-                          : `4 weeks back from ${endDateStr}`
-                        } (Data points: {acuityTrendData.length})
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {acuityIndexLoading && <RefreshCcw className="h-3 w-3 animate-spin text-muted-foreground" />}
-                      <DataSourceBadge source={dataSource} showLabel={false} />
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className={cn("h-[280px] w-full transition-opacity duration-300", acuityIndexLoading && "opacity-60")}>
-                      {acuityTrendData.length === 0 ? (
-                        <div className="flex items-center justify-center h-full text-muted-foreground">
-                          No trend data available
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={acuityTrendData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                            <XAxis
-                              dataKey="week"
-                              stroke="hsl(var(--muted-foreground))"
-                              fontSize={11}
-                              tickLine={false}
-                              axisLine={false}
-                            />
-                            <YAxis
-                              domain={['auto', 'auto']}
-                              stroke="hsl(var(--muted-foreground))"
-                              fontSize={11}
-                              tickLine={false}
-                              axisLine={false}
-                            />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="index"
-                              stroke="hsl(var(--primary))"
-                              strokeWidth={2}
-                              dot={{ r: 4, fill: "hsl(var(--primary))", strokeWidth: 2, stroke: "hsl(var(--background))" }}
-                              activeDot={{ r: 6 }}
-                              isAnimationActive={true}
-                              animationDuration={600}
-                              animationEasing="ease-in-out"
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                <AcuityTrendChart
+                  useAcuityDateRangeMode={useAcuityDateRangeMode}
+                  startDateStr={startDateStr}
+                  endDateStr={endDateStr}
+                  acuityTrendData={acuityTrendData}
+                  acuityIndexLoading={acuityIndexLoading}
+                  dataSource={dataSource}
+                />
               )}
 
               {/* Data Tables - Row 2 (3 columns) */}
-              <div className="grid gap-4 lg:grid-cols-3">
-                {/* Wound Activity Metrics Card */}
-                {isComponentEnabled('facility-report', 'card-wound-activity') && (
-                  <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                      <CardTitle className="text-base">Wound Activity Metrics</CardTitle>
-                      <DataSourceBadge source={dataSource} showLabel={false} />
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 ? (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">New Wounds (%)</span>
-                            <span className="text-sm font-semibold">{data[0]['New Wounds (%)'] ? parseFloat(data[0]['New Wounds (%)']).toFixed(1) : 0}%</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Resolution Rate (%)</span>
-                            <span className="text-sm font-semibold">{data[0]['Resolution Rate (%)'] ? parseFloat(data[0]['Resolution Rate (%)']).toFixed(1) : 0}%</span>
-                          </div>
-                          <div
-                            className="flex justify-between items-center border-b pb-1.5 cursor-pointer hover:bg-muted/50 rounded-md px-1 -mx-1 transition-colors"
-                            onClick={() => { setNewWoundsModalOpen(true); refetchNewWounds(); }}
-                          >
-                            <span className="text-xs text-muted-foreground">Number of New Wounds</span>
-                            <span className="text-sm font-semibold text-blue-600 hover:text-blue-700">{data[0]['Number of New Wounds'] ?? 0}</span>
-                          </div>
-                          <div
-                            className="flex justify-between items-center border-b pb-1.5 cursor-pointer hover:bg-muted/50 rounded-md px-1 -mx-1 transition-colors"
-                            onClick={() => { setResolvedWoundsModalOpen(true); refetchResolvedWounds(); }}
-                          >
-                            <span className="text-xs text-muted-foreground">Number of Resolved Wounds</span>
-                            <span className="text-sm font-semibold text-green-600 hover:text-green-700">{data[0]['Number of Resolved Wounds'] ?? 0}</span>
-                          </div>
-                          <div
-                            className="flex justify-between items-center border-b pb-1.5 cursor-pointer hover:bg-muted/50 rounded-md px-1 -mx-1 transition-colors"
-                            onClick={() => { setActiveWoundsModalOpen(true); refetchActiveWounds(); }}
-                          >
-                            <span className="text-xs text-muted-foreground">Number of Active Wounds</span>
-                            <span className="text-sm font-semibold text-amber-600 hover:text-amber-700">{data[0]['Number of Active Wounds'] ?? 0}</span>
-                          </div>
-                          <div
-                            className="flex justify-between items-center cursor-pointer hover:bg-muted/50 rounded-md px-1 -mx-1 transition-colors"
-                            onClick={() => { setChronicWoundsModalOpen(true); refetchChronicWounds(); }}
-                          >
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Clock className="h-3 w-3 text-orange-500" />
-                              Chronic Wounds (Older than 100 Days)
-                            </span>
-                            <span className="text-sm font-semibold text-orange-600 hover:text-orange-700">{chronicWoundsData?.total_wounds ?? data[0]['Wounds > 100 Days'] ?? 0}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">No data available</p>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Average Healing Times Card */}
-                {isComponentEnabled('facility-report', 'card-healing-times') && (
-                  <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                      <CardTitle className="text-base">Average Healing Times (Days)</CardTitle>
-                      <DataSourceBadge source={dataSource} showLabel={false} />
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 ? (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">All Wounds</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - All'] != null ? parseFloat(data[0]['Average Healing Days - All']).toFixed(2) : '-'}</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Arterial</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - Arterial'] != null ? parseFloat(data[0]['Average Healing Days - Arterial']).toFixed(2) : '-'}</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Venous</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - Venous'] != null ? parseFloat(data[0]['Average Healing Days - Venous']).toFixed(2) : '-'}</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Diabetic</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - Diabetic'] != null ? parseFloat(data[0]['Average Healing Days - Diabetic']).toFixed(2) : '-'}</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Pressure I/II</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - Pressure Ulcer Stage I'] != null ? parseFloat(data[0]['Average Healing Days - Pressure Ulcer Stage I']).toFixed(2) : '-'} / {data[0]['Average Healing Days - Pressure Ulcer Stage II'] != null ? parseFloat(data[0]['Average Healing Days - Pressure Ulcer Stage II']).toFixed(2) : '-'}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-muted-foreground">Pressure III/IV</span>
-                            <span className="text-sm font-semibold">{data[0]['Average Healing Days - Pressure Ulcer Stage III'] != null ? parseFloat(data[0]['Average Healing Days - Pressure Ulcer Stage III']).toFixed(2) : '-'} / {data[0]['Average Healing Days - Pressure Ulcer Stage IV'] != null ? parseFloat(data[0]['Average Healing Days - Pressure Ulcer Stage IV']).toFixed(2) : '-'}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">No data available</p>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Patient & Acuity Metrics Card */}
-                {isComponentEnabled('facility-report', 'card-patient-acuity') && (
-                  <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                      <CardTitle className="text-base">Patient & Acuity Metrics</CardTitle>
-                      <DataSourceBadge source={dataSource} showLabel={false} />
-                    </CardHeader>
-                    <CardContent>
-                      {Array.isArray(data) && data.length > 0 ? (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Wounds</span>
-                            <span className="text-sm font-semibold">{activeWoundsData?.total_wounds ?? 0}</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b pb-1.5">
-                            <span className="text-xs text-muted-foreground">Avg PUSH Score</span>
-                            <span className="text-sm font-semibold">{data[0]['average_push_score'] ? parseFloat(data[0]['average_push_score']).toFixed(2) : 0}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-muted-foreground">Acuity Level</span>
-                            <span className="text-sm font-semibold text-orange-600">{data[0]['acuity_level'] ?? 'N/A'}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">No data available</p>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
+              <WoundReportDataTables
+                isComponentEnabled={isComponentEnabled}
+                dataSource={dataSource}
+                data={data}
+                setNewWoundsModalOpen={setNewWoundsModalOpen}
+                refetchNewWounds={refetchNewWounds}
+                setResolvedWoundsModalOpen={setResolvedWoundsModalOpen}
+                refetchResolvedWounds={refetchResolvedWounds}
+                setActiveWoundsModalOpen={setActiveWoundsModalOpen}
+                refetchActiveWounds={refetchActiveWounds}
+                setChronicWoundsModalOpen={setChronicWoundsModalOpen}
+                refetchChronicWounds={refetchChronicWounds}
+                chronicWoundsData={chronicWoundsData}
+                activeWoundsData={activeWoundsData}
+              />
 
               {/* PUSH Score Over Time Chart - Row 3 (only show if date range spans multiple days) */}
               {startDateStr !== endDateStr && isComponentEnabled('facility-report', 'chart-push-score') && (
-                <Card className="shadow-sm">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        Change in PUSH Score Over Time
-                        {pushScoreTrend.direction === 'improving' && (
-                          <span className="flex items-center text-sm font-normal text-green-600">
-                            <TrendingDown className="h-4 w-4 mr-1" />
-                            Improving ({pushScoreTrend.change})
-                          </span>
-                        )}
-                        {pushScoreTrend.direction === 'worsening' && (
-                          <span className="flex items-center text-sm font-normal text-red-600">
-                            <TrendingUp className="h-4 w-4 mr-1" />
-                            Worsening (+{pushScoreTrend.change})
-                          </span>
-                        )}
-                        {pushScoreTrend.direction === 'stable' && (
-                          <span className="flex items-center text-sm font-normal text-gray-500">
-                            Stable
-                          </span>
-                        )}
-                      </CardTitle>
-                      <CardDescription>
-                        Average PUSH score across all wounds by date of service
-                      </CardDescription>
-                    </div>
-                    <DataSourceBadge source={dataSource} showLabel={false} />
-                  </CardHeader>
-                  <CardContent>
-                    {pushScoreByDate.length > 0 ? (
-                      <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart
-                            data={pushScoreByDate}
-                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                          >
-                            <defs>
-                              <linearGradient id="pushScoreGradient" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#f97316" stopOpacity={0.8} />
-                                <stop offset="95%" stopColor="#f97316" stopOpacity={0.1} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                            <XAxis
-                              dataKey="date"
-                              tickFormatter={(value) => {
-                                try {
-                                  const date = new Date(value);
-                                  return format(date, 'MM/dd');
-                                } catch {
-                                  return value;
-                                }
-                              }}
-                              className="text-xs fill-muted-foreground"
-                            />
-                            <YAxis
-                              domain={[0, 17]}
-                              tickCount={6}
-                              className="text-xs fill-muted-foreground"
-                              label={{ value: 'PUSH Score', angle: -90, position: 'insideLeft', className: 'fill-muted-foreground text-xs' }}
-                            />
-                            <Tooltip
-                              content={({ active, payload, label }) => {
-                                if (active && payload && payload.length) {
-                                  return (
-                                    <div className="bg-background border rounded-lg shadow-lg p-3">
-                                      <p className="font-medium">{label}</p>
-                                      <p className="text-orange-600">
-                                        Avg PUSH Score: <span className="font-bold">{payload[0].value}</span>
-                                      </p>
-                                      <p className="text-muted-foreground text-sm">
-                                        Encounters: {payload[0].payload.encounters}
-                                      </p>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              }}
-                            />
-                            <ReferenceLine y={6} stroke="#22c55e" strokeDasharray="5 5" label={{ value: 'Low', position: 'right', className: 'fill-green-600 text-xs' }} />
-                            <ReferenceLine y={12} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'High', position: 'right', className: 'fill-red-600 text-xs' }} />
-                            <Area
-                              type="monotone"
-                              dataKey="avgPushScore"
-                              stroke="#f97316"
-                              strokeWidth={2}
-                              fill="url(#pushScoreGradient)"
-                              dot={{ fill: '#f97316', strokeWidth: 2, r: 4 }}
-                              activeDot={{ r: 6, stroke: '#f97316', strokeWidth: 2 }}
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ) : (
-                      <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                        No PUSH score data available for the selected period
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                <PushScoreChart
+                  pushScoreTrend={pushScoreTrend}
+                  dataSource={dataSource}
+                  pushScoreByDate={pushScoreByDate}
+                />
               )}
             </div>
           )}
@@ -996,34 +613,4 @@ export default function FacilityWoundReport() {
       />
     </div>
   );
-}
-
-function DateRangePicker({ date, setDate, label, enabledDates }: { date: Date | undefined, setDate: (d: Date | undefined) => void, label: string, enabledDates?: string[] }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant={"outline"}
-          className={cn(
-            "w-[228px] justify-start text-left font-normal",
-            !date && "text-muted-foreground"
-          )}
-        >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {date ? format(date, "PPP") : <span>{label}</span>}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[288px] p-0" align="start">
-        <Calendar
-          mode="single"
-          selected={date}
-          onSelect={setDate}
-          initialFocus
-          defaultMonth={date}
-          enabledDates={enabledDates}
-          className="w-full"
-        />
-      </PopoverContent>
-    </Popover>
-  )
 }
