@@ -1,9 +1,19 @@
 import { logger } from "@/lib/logger";
 /**
- * Secure Storage Utility for HIPAA Compliance
- * 
- * Encrypts sensitive data before storing in localStorage using AES-GCM.
- * Uses a session-derived encryption key that's not persisted.
+ * Session-scoped obfuscation for sensitive values kept in localStorage.
+ *
+ * Encrypts SENSITIVE_KEYS with AES-GCM using a key derived (PBKDF2) from a
+ * random UUID held in sessionStorage. Scope and LIMITATIONS (see END-2 note,
+ * Curisec_Facilities_END-2_Seguridad.docx):
+ *  - Does NOT protect against XSS or local access during an active session: the
+ *    key material lives in sessionStorage next to the ciphertext, so a script in
+ *    this origin can re-derive the key and decrypt.
+ *  - Real (narrow) benefit: once the tab/session closes, the sessionStorage key
+ *    is gone, so any stale encrypted data left in localStorage becomes unrecoverable.
+ *  - This is client-side hardening, NOT a HIPAA control by itself. HIPAA safeguards
+ *    live server-side (encryption at rest, access control, audit logging). The
+ *    strongest client-side controls are: store as little PHI as possible, clear on
+ *    logout/unload, and prevent XSS (CSP + dependency hygiene).
  */
 
 // Encryption key stored in memory only (cleared on page refresh)

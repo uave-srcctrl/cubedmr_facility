@@ -78,14 +78,7 @@ export default function Login({ onLogin }: LoginProps) {
 
       // Replicate EXACT Dart flow:
       // Step 1: In authenticate(), Dart does: SHA256(password)
-      let firstHash = await sha256(values.password);
-      /*
-      // Special hardcoded hash for drperez@curisec.com
-      if (email.toLowerCase() === "drperez@curisec.com") {
-        firstHash = "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f";
-        logger.debug("[Login] SPECIAL: Using hardcoded hash for drperez@curisec.com");
-      }
-      */
+      const firstHash = await sha256(values.password);
       // Step 2: In getData(), Dart builds salt and does: SHA256(email + "38457487" + deviceId)
       const salt = `${email}38457487${deviceId}`;
       const encountertrackid = await sha256(salt);
